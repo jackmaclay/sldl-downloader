@@ -1,0 +1,25 @@
+{
+  "name": "sldl-downloader",
+  "productName": "SLDL Downloader",
+  "version": "1.0.0",
+  "description": "Simple GUI for downloading Spotify playlists via Soulseek",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "author": "Jack M",
+  "license": "MIT",
+  "build": {
+    "appId": "com.jackm.sldl-downloader",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": ["dmg", "zip"],
+      "icon": "icon.icns"
+    },
+    "dmg": {
+      "title": "SLDL Downloader",
+      "icon": "icon.icns"
+    }
+  }
+}

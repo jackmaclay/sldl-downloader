@@ -14,12 +14,19 @@
     "appId": "com.jackm.sldl-downloader",
     "mac": {
       "category": "public.app-category.music",
-      "target": ["dmg", "zip"],
-      "icon": "icon.icns"
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns"
     },
     "dmg": {
       "title": "SLDL Downloader",
-      "icon": "icon.icns"
+      "icon": "build/icon.icns"
     }
+  },
+  "devDependencies": {
+    "electron": "^39.2.3",
+    "electron-builder": "^26.0.12"
   }
 }

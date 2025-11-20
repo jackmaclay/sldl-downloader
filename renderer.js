@@ -5,12 +5,65 @@ const path = require('path');
 
 const CONFIG_PATH = path.join(os.homedir(), '.config', 'sldl', 'sldl.conf');
 
+let totalTracks = 0;
+let completedTracks = 0;
+
+// Check if settings exist on startup
+window.addEventListener('DOMContentLoaded', () => {
+    if (!fs.existsSync(CONFIG_PATH)) {
+        // No config found, switch to settings tab
+        switchTab('settings', true);
+    } else {
+        loadSettings();
+    }
+});
+
+// Select folder dialog
+function selectFolder() {
+    console.log('selectFolder called');
+    ipcRenderer.send('select-folder');
+}
+
+// Listen for selected folder
+ipcRenderer.on('selected-folder', (event, folderPath) => {
+    console.log('Folder selected:', folderPath);
+    if (folderPath) {
+        document.getElementById('download-path').value = folderPath;
+        document.getElementById('current-path').textContent = `Selected: ${folderPath}`;
+    }
+});
+
+// Toggle progress details
+function toggleDetails() {
+    const toggle = document.getElementById('details-toggle');
+    const details = document.getElementById('progress-details');
+    
+    toggle.classList.toggle('open');
+    details.classList.toggle('open');
+    
+    if (details.classList.contains('open')) {
+        toggle.textContent = 'Hide details';
+    } else {
+        toggle.textContent = 'Show details';
+    }
+}
+
 // Tab switching
-function switchTab(tabName) {
+function switchTab(tabName, skipEvent = false) {
+    console.log('Switching to tab:', tabName);
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     
-    event.target.classList.add('active');
+    // Activate the correct tab button
+    const tabs = document.querySelectorAll('.tab');
+    tabs.forEach((tab, index) => {
+        const expectedTab = index === 0 ? 'download' : 'settings';
+        if (expectedTab === tabName) {
+            tab.classList.add('active');
+        }
+    });
+    
+    // Show the correct content
     document.getElementById(`${tabName}-tab`).classList.add('active');
     
     if (tabName === 'settings') {
@@ -98,40 +151,73 @@ async function startDownload() {
     // Check if settings exist
     if (!fs.existsSync(CONFIG_PATH)) {
         showStatus('status', 'Please configure your settings first', 'error');
+        setTimeout(() => switchTab('settings', true), 2000);
         return;
     }
     
     const downloadBtn = document.getElementById('download-btn');
     const progressContainer = document.getElementById('progress-container');
     const progressText = document.getElementById('progress-text');
+    const progressBar = document.getElementById('progress-bar');
+    const progressStatus = document.getElementById('progress-status');
     
     downloadBtn.disabled = true;
     downloadBtn.textContent = 'Downloading...';
     progressContainer.classList.add('active');
-    progressText.textContent = 'Starting download...\n';
+    progressText.textContent = '';
+    progressBar.style.width = '0%';
+    progressStatus.textContent = 'Starting download...';
     document.getElementById('status').style.display = 'none';
     
-    // Send download command to main process
-    ipcRenderer.send('start-download', url);
+    // Reset counters
+    totalTracks = 0;
+    completedTracks = 0;
+    
+    // Send download command with playlist ID to main process
+    ipcRenderer.send('start-download', { url });
 }
 
 // Listen for download progress
 ipcRenderer.on('download-progress', (event, data) => {
     const progressText = document.getElementById('progress-text');
+    const progressBar = document.getElementById('progress-bar');
+    const progressStatus = document.getElementById('progress-status');
+    
     progressText.textContent += data + '\n';
     progressText.scrollTop = progressText.scrollHeight;
+    
+    // Parse progress from output
+    if (data.includes('Downloading') && data.includes('tracks:')) {
+        const match = data.match(/Downloading (\d+) tracks:/);
+        if (match) {
+            totalTracks = parseInt(match[1]);
+            progressStatus.textContent = `Downloading ${totalTracks} tracks...`;
+        }
+    }
+    
+    if (data.includes('Succeeded:')) {
+        completedTracks++;
+        if (totalTracks > 0) {
+            const percentage = (completedTracks / totalTracks) * 100;
+            progressBar.style.width = percentage + '%';
+            progressStatus.textContent = `Downloaded ${completedTracks} of ${totalTracks} tracks (${Math.round(percentage)}%)`;
+        }
+    }
 });
 
 // Listen for download complete
 ipcRenderer.on('download-complete', (event, success) => {
     const downloadBtn = document.getElementById('download-btn');
+    const progressBar = document.getElementById('progress-bar');
+    
     downloadBtn.disabled = false;
     downloadBtn.textContent = 'Start Download';
     
     if (success) {
+        progressBar.style.width = '100%';
         showStatus('status', '✓ Download completed successfully!', 'success');
     } else {
-        showStatus('status', '✗ Download failed. Check the progress log above.', 'error');
+        showStatus('status', '✗ Download failed. Check the details above.', 'error');
     }
 });
 
@@ -147,8 +233,3 @@ function showStatus(elementId, message, type) {
         }, 5000);
     }
 }
-
-// Load settings on startup
-window.addEventListener('DOMContentLoaded', () => {
-    loadSettings();
-});

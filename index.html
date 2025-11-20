@@ -111,6 +111,30 @@
             outline: none;
             border-color: #667eea;
         }
+
+        .folder-select {
+            display: flex;
+            gap: 8px;
+        }
+
+        .folder-select input {
+            flex: 1;
+        }
+
+        .folder-select button {
+            padding: 12px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .folder-select button:hover {
+            background: #5568d3;
+        }
         
         .btn {
             width: 100%;
@@ -142,25 +166,84 @@
         
         .progress-container {
             margin-top: 20px;
-            padding: 20px;
-            background: #f9fafb;
-            border-radius: 8px;
             display: none;
         }
         
         .progress-container.active {
             display: block;
         }
+
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-status {
+            font-size: 14px;
+            color: #374151;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+        .details-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #6b7280;
+            transition: background 0.2s;
+        }
+
+        .details-toggle:hover {
+            background: #f3f4f6;
+        }
+
+        .details-toggle::before {
+            content: '▶';
+            font-size: 10px;
+            transition: transform 0.2s;
+        }
+
+        .details-toggle.open::before {
+            transform: rotate(90deg);
+        }
+
+        .progress-details {
+            margin-top: 8px;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .progress-details.open {
+            display: block;
+        }
         
         .progress-text {
-            font-size: 14px;
+            font-size: 13px;
             color: #6b7280;
-            margin-bottom: 12px;
             font-family: 'Monaco', 'Courier New', monospace;
             white-space: pre-wrap;
             word-break: break-all;
-            max-height: 200px;
-            overflow-y: auto;
         }
         
         .status {
@@ -199,13 +282,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎵 SLDL Downloader</h1>
+            <h1>SLDL Downloader</h1>
             <p>Download Spotify playlists via Soulseek</p>
         </div>
         
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('download')">Download</button>
-            <button class="tab" onclick="switchTab('settings')">Settings</button>
+            <button class="tab active" onclick="switchTab('download', false)">Download</button>
+            <button class="tab" onclick="switchTab('settings', false)">Settings</button>
         </div>
         
         <!-- Download Tab -->
@@ -221,7 +304,16 @@
             </button>
             
             <div class="progress-container" id="progress-container">
-                <div class="progress-text" id="progress-text">Initializing...</div>
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <div class="progress-status" id="progress-status">Initializing...</div>
+                <div class="details-toggle" id="details-toggle" onclick="toggleDetails()">
+                    Show details
+                </div>
+                <div class="progress-details" id="progress-details">
+                    <div class="progress-text" id="progress-text"></div>
+                </div>
             </div>
             
             <div class="status" id="status"></div>
@@ -241,7 +333,10 @@
             
             <div class="form-group">
                 <label>Download Folder</label>
-                <input type="text" id="download-path" placeholder="/Users/you/Desktop/AutoDownloads">
+                <div class="folder-select">
+                    <input type="text" id="download-path" placeholder="Select download folder" readonly>
+                    <button onclick="selectFolder()">Browse</button>
+                </div>
                 <div class="file-path" id="current-path"></div>
             </div>
             

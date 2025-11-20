@@ -8,6 +8,28 @@ const CONFIG_PATH = path.join(os.homedir(), '.config', 'sldl', 'sldl.conf');
 let totalTracks = 0;
 let completedTracks = 0;
 
+// Theme toggle
+function toggleTheme() {
+    const body = document.body;
+    const toggle = document.getElementById('theme-toggle');
+    
+    body.classList.toggle('dark');
+    body.classList.toggle('light');
+    toggle.classList.toggle('active');
+    
+    // Save preference
+    const isDark = body.classList.contains('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
+// Load theme preference on startup
+const savedTheme = localStorage.getItem('theme') || 'dark';
+if (savedTheme === 'light') {
+    document.body.classList.remove('dark');
+    document.body.classList.add('light');
+    // Will update toggle in DOMContentLoaded
+}
+
 // Check if settings exist on startup
 window.addEventListener('DOMContentLoaded', () => {
     if (!fs.existsSync(CONFIG_PATH)) {

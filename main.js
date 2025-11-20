@@ -8,21 +8,20 @@ let mainWindow;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 700,
-        height: 800,
+        width: 650,
+        height: 750,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false
         },
-        backgroundColor: '#667eea',
-        titleBarStyle: 'default',
+        backgroundColor: '#1a1a1a',
+        titleBarStyle: 'hiddenInset',  // This hides the title bar on Mac
+        frame: true,  // Keep true for Mac traffic lights
+        transparent: false,
         title: 'SLDL Downloader'
     });
 
     mainWindow.loadFile('index.html');
-    
-    // Uncomment next line for debugging
-    // mainWindow.webContents.openDevTools();
 }
 
 app.whenReady().then(createWindow);

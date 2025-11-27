@@ -114,6 +114,9 @@ function loadSettings() {
                     document.getElementById('download-path').value = value;
                     document.getElementById('current-path').textContent = `Current: ${value}`;
                 }
+                if (key.trim() === 'pref-format') {
+                    document.getElementById('audio-format').value = value;
+                }
             });
         }
     } catch (error) {
@@ -126,6 +129,7 @@ function saveSettings() {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const downloadPath = document.getElementById('download-path').value;
+    const audioFormat = document.getElementById('audio-format').value;
     
     if (!username || !password || !downloadPath) {
         showStatus('settings-status', 'Please fill in all fields', 'error');
@@ -136,7 +140,7 @@ function saveSettings() {
 pass = ${password}
 path = ${downloadPath}
 name-format = {artist} - {title}
-pref-format = flac`;
+pref-format = ${audioFormat}`;
     
     try {
         const configDir = path.dirname(CONFIG_PATH);

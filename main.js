@@ -4,6 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+const isDev = !app.isPackaged;
+const sldlPath = isDev 
+  ? 'sldl'  // Use system sldl in development
+  : path.join(process.resourcesPath, 'sldl');  // Use bundled sldl in production
+
 let mainWindow;
 
 function createWindow() {
@@ -15,9 +20,9 @@ function createWindow() {
             contextIsolation: false
         },
         backgroundColor: '#1a1a1a',
-        titleBarStyle: 'hiddenInset',  // This hides the title bar on Mac
-        frame: true,  // Keep true for Mac traffic lights
-        transparent: false,
+        titleBarStyle: 'hiddenInset',
+        vibrancy: 'under-window',
+        visualEffectState: 'active',
         title: 'SLDL Downloader'
     });
 
@@ -93,8 +98,8 @@ ipcMain.on('start-download', (event, data) => {
     
     const itemsBeforeSet = new Set(itemsBefore);
     
-    // Run sldl normally
-    const sldl = spawn('sldl', [url]);
+    // Run sldl with bundled or system path
+    const sldl = spawn(sldlPath, [url]);
     
     sldl.stdout.on('data', (data) => {
         event.sender.send('download-progress', data.toString());
@@ -142,7 +147,7 @@ ipcMain.on('start-download', (event, data) => {
                             
                             try {
                                 const stat = fs.statSync(itemPath);
-                                if (stat.isFile() &&
+                                if (stat.isFile() && 
                                     (item.endsWith('.flac') || item.endsWith('.mp3') || item.endsWith('.m4a'))) {
                                     const destPath = path.join(playlistFolder, item);
                                     fs.renameSync(itemPath, destPath);

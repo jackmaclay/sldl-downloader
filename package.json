@@ -12,13 +12,25 @@
   "license": "MIT",
   "build": {
     "appId": "com.jackm.sldl-downloader",
+    "files": [
+      "**/*",
+      "!resources/sldl"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/sldl",
+        "to": "sldl",
+        "filter": ["**/*"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.music",
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false
     },
     "dmg": {
       "title": "SLDL Downloader",

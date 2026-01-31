@@ -217,17 +217,43 @@ ipcRenderer.on('download-progress', (event, data) => {
         const match = data.match(/Downloading (\d+) tracks:/);
         if (match) {
             totalTracks = parseInt(match[1]);
-            progressStatus.textContent = `Downloading ${totalTracks} tracks...`;
+            progressStatus.textContent = `Found ${totalTracks} tracks to download...`;
+            progressBar.style.width = '5%'; // Show initial progress
+        }
+    }
+    
+    // Track searching progress
+    if (data.includes('Searching:')) {
+        const searchingCount = (data.match(/Searching:/g) || []).length;
+        if (totalTracks > 0) {
+            const searchProgress = Math.min(30, (searchingCount / totalTracks) * 30); // Searching is 0-30%
+            progressBar.style.width = searchProgress + '%';
+            progressStatus.textContent = `Searching for tracks... (${searchingCount}/${totalTracks})`;
+        }
+    }
+    
+    // Track download progress
+    if (data.includes('InProgress:')) {
+        if (totalTracks > 0) {
+            const downloadProgress = 30 + ((completedTracks / totalTracks) * 60); // Downloading is 30-90%
+            progressBar.style.width = downloadProgress + '%';
+            progressStatus.textContent = `Downloading... ${completedTracks}/${totalTracks} completed`;
         }
     }
     
     if (data.includes('Succeeded:')) {
         completedTracks++;
         if (totalTracks > 0) {
-            const percentage = (completedTracks / totalTracks) * 100;
+            const percentage = 30 + ((completedTracks / totalTracks) * 60); // 30-90%
             progressBar.style.width = percentage + '%';
-            progressStatus.textContent = `Downloaded ${completedTracks} of ${totalTracks} tracks (${Math.round(percentage)}%)`;
+            progressStatus.textContent = `Downloaded ${completedTracks} of ${totalTracks} tracks (${Math.round((completedTracks/totalTracks)*100)}%)`;
         }
+    }
+    
+    // Organizing files
+    if (data.includes('--- Organizing files ---')) {
+        progressBar.style.width = '95%';
+        progressStatus.textContent = 'Organizing files...';
     }
 });
 
@@ -235,13 +261,23 @@ ipcRenderer.on('download-progress', (event, data) => {
 ipcRenderer.on('download-complete', (event, success) => {
     const downloadBtn = document.getElementById('download-btn');
     const progressBar = document.getElementById('progress-bar');
+    const progressStatus = document.getElementById('progress-status');
+    const progressContainer = document.getElementById('progress-container');
     
     downloadBtn.disabled = false;
     downloadBtn.textContent = 'Start Download';
     
     if (success) {
         progressBar.style.width = '100%';
-        showStatus('status', '✓ Download completed successfully!', 'success');
+        progressStatus.textContent = '🎉 Download completed successfully!';
+        
+        // Add success animation
+        progressContainer.classList.add('complete');
+        setTimeout(() => {
+            progressContainer.classList.remove('complete');
+        }, 3000);
+        
+        showStatus('status', `✓ Successfully downloaded ${completedTracks} track${completedTracks !== 1 ? 's' : ''}!`, 'success');
     } else {
         showStatus('status', '✗ Download failed. Check the details above.', 'error');
     }

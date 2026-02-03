@@ -282,6 +282,80 @@
             transform: none;
         }
         
+        .ipod-section {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid;
+        }
+        
+        body.dark .ipod-section {
+            background: #1a1a1a;
+            border-color: #3d3d3d;
+        }
+        
+        body.light .ipod-section {
+            background: rgba(255,255,255,0.5);
+            border-color: rgba(118, 75, 162, 0.3);
+        }
+        
+        .ipod-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .ipod-icon {
+            font-size: 32px;
+        }
+        
+        .ipod-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        body.dark .ipod-title {
+            color: #e0e0e0;
+        }
+        
+        body.light .ipod-title {
+            color: #333;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #e8773d;
+        }
+        
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+        
+        .hint {
+            font-size: 13px;
+            margin-top: 6px;
+            transition: color 0.3s ease;
+        }
+        
+        body.dark .hint {
+            color: #808080;
+        }
+        
+        body.light .hint {
+            color: #888;
+        }
+        
         .progress-container {
             margin-top: 20px;
             display: none;
@@ -453,20 +527,6 @@
             color: #888;
         }
         
-        .hint {
-            font-size: 13px;
-            margin-top: 6px;
-            transition: color 0.3s ease;
-        }
-        
-        body.dark .hint {
-            color: #808080;
-        }
-        
-        body.light .hint {
-            color: #888;
-        }
-        
         .theme-toggle {
             display: flex;
             align-items: center;
@@ -595,6 +655,26 @@
                 <label>Spotify Playlist URL</label>
                 <input type="text" id="playlist-url" placeholder="https://open.spotify.com/playlist/...">
                 <div class="hint">Paste any public Spotify playlist link</div>
+            </div>
+            
+            <!-- iPod Companion Section -->
+            <div class="ipod-section">
+                <div class="ipod-header">
+                    <div class="ipod-icon">🎵</div>
+                    <div class="ipod-title">iPod Companion Mode</div>
+                </div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="ipod-mode">
+                    <label for="ipod-mode">Enable iPod Companion Mode</label>
+                </div>
+                <div class="hint">Automatically add to iTunes/Music and sync to iPod (macOS only)</div>
+                
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>Playlist Name (optional)</label>
+                    <input type="text" id="playlist-name" placeholder="Leave blank to use Spotify name">
+                    <div class="hint">Custom name for your iTunes playlist</div>
+                </div>
             </div>
             
             <button class="btn" id="download-btn" onclick="startDownload()">

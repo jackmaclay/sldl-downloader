@@ -1,0 +1,76 @@
+'use strict';
+// Where downloaded music lives (Jack, 2026-11-25).
+//   iPod folder = sldl's download folder (~/Music/New Downloads/<playlist>): always MP3 (or m4a), laid out for the iPods.
+//   Mac library = ~/Music/Playlists/<playlist>: the format Jack chose. When it is the same file as the iPod one it is an
+//                 APFS clone (no second copy on disk); when it is FLAC the iPod folder gets a converted MP3 instead.
+//   "only" = a single folder and nowhere else (Lily's playlists).
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+const { AUDIO } = require('./sldl');
+
+const IPOD_OK = /\.(mp3|m4a|aac)$/i;
+const expand = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
+const listAudio = (dir) => { try { return fs.readdirSync(dir).filter((f) => AUDIO.test(f) && !f.startsWith('.')).map((f) => path.join(dir, f)); } catch { return []; } };
+
+// Copy-on-write clone where the filesystem allows it (APFS, same volume), else an ordinary copy. Returns 'clone' | 'copy'.
+function clone(src, dest) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try { fs.copyFileSync(src, dest, fs.constants.COPYFILE_FICLONE_FORCE); return 'clone'; } catch { /* not cloneable here */ }
+  fs.copyFileSync(src, dest); return 'copy';
+}
+
+// A GUI app does not inherit the shell PATH, so look in the usual Homebrew places too.
+function findFfmpeg() {
+  const cands = [process.env.FFMPEG_BIN, '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg', 'ffmpeg'].filter(Boolean);
+  for (const c of cands) { try { execFileSync(c, ['-version'], { stdio: 'ignore' }); return c; } catch { /* next */ } }
+  return null;
+}
+function ffmpegToMp3(bin) {
+  return (src, out) => execFileSync(bin, ['-v', 'error', '-y', '-i', src, '-map', '0:a:0', '-map', '0:v:0?', '-c:v', 'copy', '-disposition:v', 'attached_pic',
+    '-c:a', 'libmp3lame', '-b:a', '320k', '-ar', '44100', '-map_metadata', '0', '-id3v2_version', '3', out], { stdio: 'ignore' });
+}
+
+const unique = (p) => { if (!fs.existsSync(p)) return p; const e = path.extname(p); const b = p.slice(0, -e.length); let i = 2; while (fs.existsSync(`${b} (${i})${e}`)) i++; return `${b} (${i})${e}`; };
+
+// Files one finished sldl run. staging = the folder sldl made. Returns { ipodFolder, libraryFolder, ipod:[files], cloned, copied, converted, notes }.
+//   saveToLibrary false: files go to the iPod folder only (non-MP3 files are converted and the original dropped).
+//   saveToLibrary true:  MP3/m4a go to the iPod folder and are cloned into the library; FLAC and other formats go to the library
+//                        and a converted MP3 goes to the iPod folder.
+function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert }) {
+  const out = { ipodFolder: path.join(ipodDir, name), libraryFolder: libraryDir ? path.join(libraryDir, name) : null, ipod: [], cloned: 0, copied: 0, converted: 0, notes: [] };
+  fs.mkdirSync(out.ipodFolder, { recursive: true });
+  const lib = saveToLibrary && out.libraryFolder;
+  if (lib) fs.mkdirSync(out.libraryFolder, { recursive: true });
+  const count = (how) => (how === 'clone' ? out.cloned++ : out.copied++);
+  for (const f of listAudio(staging)) {
+    const base = path.basename(f);
+    if (IPOD_OK.test(f)) {
+      const dest = path.join(out.ipodFolder, base);
+      if (fs.existsSync(dest)) { fs.unlinkSync(f); out.ipod.push(dest); } else { fs.renameSync(f, dest); out.ipod.push(dest); }
+      if (lib) { const t = path.join(out.libraryFolder, base); if (!fs.existsSync(t)) count(clone(dest, t)); }
+      continue;
+    }
+    // FLAC, ogg, wav...: the iPod needs an MP3
+    const mp3 = path.join(out.ipodFolder, path.basename(base, path.extname(base)) + '.mp3');
+    if (!convert) { out.notes.push(`${base}: ffmpeg not found, could not make an MP3 for the iPod`); if (lib) fs.renameSync(f, unique(path.join(out.libraryFolder, base))); continue; }
+    if (lib) {
+      const kept = unique(path.join(out.libraryFolder, base)); fs.renameSync(f, kept);       // the library keeps the lossless original
+      if (!fs.existsSync(mp3)) { convert(kept, mp3); out.converted++; }
+    } else { if (!fs.existsSync(mp3)) { convert(f, mp3); out.converted++; } fs.unlinkSync(f); }
+    out.ipod.push(mp3);
+  }
+  return out;
+}
+
+// A playlist that lives in ONE folder only (for example Lily's): move it there, merging if it exists.
+function moveOnly(folder, only) {
+  const dest = path.join(expand(only), path.basename(folder));
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  if (!fs.existsSync(dest)) { fs.renameSync(folder, dest); return dest; }
+  for (const f of fs.readdirSync(folder)) { const t = path.join(dest, f); if (!fs.existsSync(t)) fs.renameSync(path.join(folder, f), t); }
+  return dest;
+}
+
+module.exports = { unique, clone, fileGroup, moveOnly, findFfmpeg, ffmpegToMp3, listAudio, expand, IPOD_OK };

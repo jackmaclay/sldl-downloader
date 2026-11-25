@@ -146,3 +146,62 @@ test('guard: no real device serials, Apple IDs or team ids in tracked files (the
     .filter((f) => { try { return bad.test(fs.readFileSync(path.join(root, f), 'utf8')); } catch { return false; } });
   assert.deepStrictEqual(hits, []);
 });
+
+test('dedupe: a remaster or a different file name still counts as the same song', async () => {
+  const dedupe = require('../src/dedupe');
+  assert.strictEqual(dedupe.keyOf('Imagine - Remastered 2010', 'John Lennon'), dedupe.keyOf('Imagine', 'John Lennon'));
+  assert.strictEqual(dedupe.keyOf("I'm On Fire", 'Bruce Springsteen'), dedupe.keyOf('Im On Fire (Live)', 'Bruce Springsteen, X'));
+  const d = tmp(); fs.mkdirSync(path.join(d, 'a'));
+  fs.writeFileSync(path.join(d, 'a', 'Candy - Paolo Nutini.mp3'), 'x'); fs.writeFileSync(path.join(d, 'a', '01 - Wild Thing - The Troggs.flac'), 'y');
+  const ix = await dedupe.buildIndex([d], { tags: false });
+  assert.ok(ix.find('Candy', 'Paolo Nutini'));
+  assert.ok(ix.find('Wild Thing', 'The Troggs', true));   // lossless asked for, lossless exists
+  assert.strictEqual(ix.find('Candy', 'Paolo Nutini', true), null); // only an mp3 exists, so a FLAC request is not satisfied
+  assert.strictEqual(ix.find('Nothing Here', 'Nobody'), null);
+});
+
+test('library.fileGroup: iPod folder gets MP3, library gets a clone or the FLAC, iPod gets a converted MP3', () => {
+  const library = require('../src/library');
+  const stage = tmp(); const ipod = tmp(); const lib = tmp();
+  fs.writeFileSync(path.join(stage, 'A - One.mp3'), 'mp3data'); fs.writeFileSync(path.join(stage, 'B - Two.flac'), 'flacdata');
+  const convert = (src, out) => fs.writeFileSync(out, 'converted:' + fs.readFileSync(src, 'utf8'));
+  const r = library.fileGroup({ staging: stage, name: 'List', ipodDir: ipod, libraryDir: lib, saveToLibrary: true, convert });
+  assert.strictEqual(fs.readFileSync(path.join(ipod, 'List', 'A - One.mp3'), 'utf8'), 'mp3data');
+  assert.strictEqual(fs.readFileSync(path.join(lib, 'List', 'A - One.mp3'), 'utf8'), 'mp3data');   // same song in both: cloned
+  assert.strictEqual(fs.readFileSync(path.join(lib, 'List', 'B - Two.flac'), 'utf8'), 'flacdata');  // library keeps the FLAC
+  assert.strictEqual(fs.readFileSync(path.join(ipod, 'List', 'B - Two.mp3'), 'utf8'), 'converted:flacdata'); // iPod gets MP3
+  assert.ok(!fs.existsSync(path.join(ipod, 'List', 'B - Two.flac')));
+  assert.strictEqual(r.cloned + r.copied, 1); assert.strictEqual(r.converted, 1);
+  // not saving to the library: only the iPod folder, and the FLAC is converted and dropped
+  const stage2 = tmp(); const ipod2 = tmp(); fs.writeFileSync(path.join(stage2, 'C - Three.flac'), 'f');
+  library.fileGroup({ staging: stage2, name: 'X', ipodDir: ipod2, libraryDir: lib, saveToLibrary: false, convert });
+  assert.deepStrictEqual(fs.readdirSync(path.join(ipod2, 'X')), ['C - Three.mp3']); assert.ok(!fs.existsSync(path.join(lib, 'X')));
+});
+
+test('runPlaylist: songs already on the Mac are reused, not downloaded again; formats split mp3/flac', async () => {
+  const plan = require('../src/plan'); const dedupe = require('../src/dedupe'); const { EventEmitter } = require('events');
+  const ipod = tmp(); const lib = tmp(); const asked = [];
+  // a song we already have, in another playlist's folder
+  fs.mkdirSync(path.join(lib, 'Old')); fs.writeFileSync(path.join(lib, 'Old', 'Have It - Band.mp3'), 'existing');
+  const index = await dedupe.buildIndex([lib], { tags: false });
+  const download = ({ input, outDir, format }) => {
+    const ev = new EventEmitter(); const rows = fs.readFileSync(input, 'utf8').trim().split('\n').slice(1); asked.push({ format, rows: rows.length });
+    const folder = path.join(outDir, path.basename(input, '.csv')); fs.mkdirSync(folder, { recursive: true });
+    for (const r of rows) { const [, , title] = r.split('","'); fs.writeFileSync(path.join(folder, `${title.replace(/"/g, '')} - Band.${format.startsWith('flac') ? 'flac' : 'mp3'}`), 'new'); }
+    ev.done = Promise.resolve({ code: 0, ok: true, total: rows.length, done: rows.length, failed: 0, folder, tracks: [] });
+    return ev;
+  };
+  const items = [{ title: 'Have It', artist: 'Band', seconds: 1, format: 'mp3' }, { title: 'New One', artist: 'Band', seconds: 1, format: 'mp3' }, { title: 'Lossless', artist: 'Band', seconds: 1, format: 'flac' }];
+  const convert = (src, out) => fs.writeFileSync(out, 'converted');
+  const r = await plan.runPlaylist({ name: 'Mine', items, saveToLibrary: true, libraryDir: lib, ipodDir: ipod, index, download, convert }).done;
+  assert.deepStrictEqual(asked, [{ format: 'mp3', rows: 1 }, { format: 'flac,mp3', rows: 1 }]); // "Have It" was NOT requested
+  assert.strictEqual(r.reused, 1); assert.strictEqual(r.done, 2);
+  assert.deepStrictEqual(fs.readdirSync(path.join(ipod, 'Mine')).sort(), ['Have It - Band.mp3', 'Lossless - Band.mp3', 'New One - Band.mp3']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(lib, 'Mine')).sort(), ['Have It - Band.mp3', 'Lossless - Band.flac', 'New One - Band.mp3']);
+  // a second playlist wanting the same songs downloads nothing
+  asked.length = 0;
+  const r2 = await plan.runPlaylist({ name: 'Again', items: items.slice(0, 2), saveToLibrary: true, libraryDir: lib, ipodDir: ipod, index, download, convert }).done;
+  assert.deepStrictEqual(asked, []); assert.strictEqual(r2.reused, 2);
+  // FLAC without a library to keep it in is refused
+  await assert.rejects(plan.runPlaylist({ name: 'N', items: [items[2]], saveToLibrary: false, libraryDir: lib, ipodDir: ipod, download, convert }).done, /FLAC is kept in your Music folder/);
+});

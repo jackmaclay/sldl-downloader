@@ -16,8 +16,9 @@ app.whenReady().then(async () => {
   await snap('0-throwaway');
   await js(`document.getElementById('url').value='https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M'`);
   await snap('1-download');
-  await js(`document.getElementById('url').value='https://open.spotify.com/user/spotify'; document.getElementById('start').click()`);
-  await new Promise((r) => setTimeout(r, 20000)); await snap('1b-profile');
+  await js(`document.getElementById('url').value='${process.env.SHOT_URL || 'https://open.spotify.com/user/spotify'}'; document.getElementById('start').click()`);
+  await new Promise((r) => setTimeout(r, 25000)); await snap('1b-profile');
+  await js(`(() => { const b = document.querySelector('.pl-head .link'); if (b) b.click(); })()`); await snap('1c-songs');
   await js(`document.querySelector('[data-page=player]').click()`); await new Promise((r)=>setTimeout(r,1500)); await snap('2-player');
   await js(`document.querySelector('[data-page=settings]').click()`); await snap('3-settings');
   app.quit();

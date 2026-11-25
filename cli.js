@@ -9,6 +9,9 @@ const sync = require('./src/sync');
 const ipod = require('./src/ipod');
 const spotify = require('./src/spotify');
 const prefs = require('./src/prefs');
+const plan = require('./src/plan');
+const dedupe = require('./src/dedupe');
+const os = require('os');
 
 const HELP = `sldl-dl: download Spotify playlists from Soulseek and put them on a player
 
@@ -16,6 +19,7 @@ Usage
   sldl-dl download <spotify-url|search> [--out DIR] [--format mp3|m4a|flac] [--name NAME]
                                          [--ipod] [--music] [--to DEST] [--layout rockbox|flat]
                                          [--playlists 1,3] [--limit-gb N]   (profile links only)
+                                         [--no-library] [--only DIR]        (Spotify links: skip the Music folder copy / keep ONLY in DIR)
   Profile links (open.spotify.com/user/...) download every public playlist if it all fits the
   space limit (default 14.5 GB, or --limit-gb). If it does not fit, nothing is downloaded: it lists
   the playlists and sizes, and you choose with --playlists 1,3. A pick that is over the limit is refused.
@@ -39,7 +43,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a.startsWith('--')) {
       const k = a.slice(2);
-      if (['json', 'music', 'force', 'ipod'].includes(k)) flags[k] = true;
+      if (['json', 'music', 'force', 'ipod', 'no-library'].includes(k)) flags[k] = true;
       else flags[k] = argv[++i];
     } else pos.push(a);
   }
@@ -86,6 +90,26 @@ async function deliver(out, flags, folder, tracks, name) {
   }
 }
 
+// Playlists with songs ({ name, items:[{title, artist, seconds}] }) -> downloaded, de-duplicated and filed (src/plan.js).
+async function runPlanned(out, flags, pls) {
+  const p = prefs.read();
+  const fmt = String(flags.format || p.defaultFormat || 'mp3').toLowerCase() === 'flac' ? 'flac' : 'mp3';
+  const only = flags.only; const save = only ? false : (flags['no-library'] ? false : p.saveToLibrary);
+  const index = await dedupe.buildIndex([conf.read().path, p.libraryDir, path.join(os.homedir(), 'Music', 'Lily')]);
+  for (const pl of pls) {
+    out.info(`--- ${pl.name}`);
+    const ev = plan.runPlaylist({ name: flags.name && pls.length === 1 ? flags.name : pl.name, items: pl.items.map((i) => ({ ...i, format: fmt })), saveToLibrary: save, only, index });
+    ev.on('total', (e) => out.info(`Found ${e.total} tracks to download`, { type: 'total', total: e.total }));
+    ev.on('reused', (e) => out.info(`Already have: ${e.track}`, { type: 'reused', track: e.track }));
+    ev.on('done', (e, c) => out.info(`[${c.done}/${c.total}] ${e.track}`, { type: 'track', track: e.track, ...c }));
+    ev.on('failed', (e) => out.info(`Failed: ${e.track}`, { type: 'failed', track: e.track }));
+    const r = await ev.done;
+    out.info(`Done: ${r.done} downloaded, ${r.reused} already had, ${r.failed} not found. Folder: ${r.folder || '(none)'}`, { type: 'finished', ...r });
+    for (const n of r.notes) out.info(`Note: ${n}`);
+    if (r.folder) await deliver(out, flags, r.folder, r.tracks, pl.name);
+  }
+}
+
 async function main() {
   const [cmd = 'help', ...rest] = process.argv.slice(2);
   const { flags, pos } = parseArgs(rest);
@@ -96,13 +120,13 @@ async function main() {
   if (cmd === 'download' && spotify.parseProfile(pos[0])) {
     const user = spotify.parseProfile(pos[0]);
     out.info(`Reading ${user}'s public playlists...`);
-    const lists = await spotify.profilePlaylists(user);
+    const lists = await spotify.profilePlaylists(user, { items: true });
     if (!lists.length) throw new Error('That profile has no public playlists.');
     const fmt = prefs.resolveFormat(flags.format, conf.read()['pref-format']);
     const budget = flags['limit-gb'] ? Math.floor(parseFloat(flags['limit-gb']) * 1e9) : spotify.DEFAULT_BUDGET;
-    const size = (p) => spotify.bytesFor(p.seconds, fmt);
+    const size = (p) => spotify.bytesFor(p.seconds, 'mp3'); // the iPod gets MP3
     const gb = (n) => (n / 1e9).toFixed(1);
-    lists.forEach((p, i) => out.info(`${String(i + 1).padStart(2)}. ${p.name}  (${p.tracks} tracks, ~${gb(size(p))} GB as ${fmt})`, { type: 'playlist', n: i + 1, ...p, bytes: size(p) }));
+    lists.forEach((p, i) => out.info(`${String(i + 1).padStart(2)}. ${p.name}  (${p.tracks} tracks, ~${gb(size(p))} GB as mp3)`, { type: 'playlist', n: i + 1, id: p.id, name: p.name, tracks: p.tracks, bytes: size(p) }));
     let chosen = lists;
     if (flags.playlists) {
       chosen = flags.playlists.split(',').map((n) => lists[parseInt(n, 10) - 1]).filter(Boolean);
@@ -113,19 +137,13 @@ async function main() {
       out.info(`Estimated ${gb(total)} GB is over the ${gb(budget)} GB limit. Nothing downloaded. Pick playlists that fit: --playlists 1,3 (or raise --limit-gb).`);
       process.exitCode = 2; return;
     }
-    out.info(`Downloading ${chosen.length} playlist${chosen.length > 1 ? 's' : ''}, ~${gb(total)} GB of ${gb(budget)} GB.`);
-    for (const p of chosen) {
-      out.info(`--- ${p.name}`);
-      const ev = sldl.download({ input: p.url, outDir: flags.out, format: flags.format, name: p.name });
-      ev.on('total', (e) => out.info(`Found ${e.total} tracks`, { type: 'total', total: e.total }));
-      ev.on('done', (e, c) => out.info(`[${c.done}/${c.total}] ${e.track}`, { type: 'track', track: e.track, ...c }));
-      ev.on('failed', (e) => out.info(`Failed: ${e.track}`, { type: 'failed', track: e.track }));
-      const r = await ev.done;
-      if (!r.ok) throw new Error(`sldl exited with code ${r.code} on "${p.name}"`);
-      out.info(`Done: ${r.done} downloaded, ${r.failed} not found.`, { type: 'finished', ...r });
-      if (r.folder) await deliver(out, flags, r.folder, r.tracks, p.name);
-    }
-    return;
+    out.info(`Downloading ${chosen.length} playlist${chosen.length > 1 ? 's' : ''}, ~${gb(total)} GB of ${gb(budget)} GB. Songs you already have are reused, not downloaded again.`);
+    return runPlanned(out, flags, chosen);
+  }
+
+  if (cmd === 'download' && spotify.playlistId(pos[0])) {
+    const pl = await spotify.playlistPlan(spotify.playlistId(pos[0]));
+    return runPlanned(out, flags, [pl]);
   }
 
   if (cmd === 'download') {

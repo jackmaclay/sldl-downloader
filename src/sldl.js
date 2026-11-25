@@ -76,7 +76,7 @@ async function prepareInput(input, c, log) {
 }
 
 // download(): returns an EventEmitter with a .done promise. Events: line, total, searching, progress, done, failed.
-function download({ input, outDir, format, name, bin = findBinary(), csvFallback = true }) {
+function download({ input, outDir, format, name, bin = findBinary(), csvFallback = true, rawFormat = false }) {
   const ev = new EventEmitter();
   const c = conf.read();
   const dir = outDir || c.path;
@@ -87,7 +87,7 @@ function download({ input, outDir, format, name, bin = findBinary(), csvFallback
     const before = snapshot(dir);
     (csvFallback ? prepareInput(input, c, (line) => ev.emit('line', line)) : Promise.resolve(input)).then((realInput) => {
     const args = [realInput, '--path', dir, '--no-progress'];
-    args.push('--pref-format', prefs.resolveFormat(format, c['pref-format'])); // mp3 unless FLAC is switched on
+    args.push('--pref-format', rawFormat ? format : prefs.resolveFormat(format, c['pref-format'])); // mp3 unless FLAC is switched on; rawFormat = the caller already chose
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     ev.cancel = () => child.kill('SIGTERM');
     const counts = { total: 0, done: 0, failed: 0 };

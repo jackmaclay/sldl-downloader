@@ -110,10 +110,16 @@ function scrapeIds(user) {
   });
 }
 
-async function profilePlaylists(user, { fetchFn } = {}) {
+// One playlist with its songs, for the download planner: { id, url, name, tracks: count, seconds, items:[{title, artist, seconds}], capped }.
+async function playlistPlan(id, fetchFn = fetch) {
+  const pl = await playlistTracks(id, fetchFn);
+  return { id, url: `https://open.spotify.com/playlist/${id}`, name: pl.name, tracks: pl.tracks.length, seconds: pl.tracks.reduce((n, t) => n + t.seconds, 0), items: pl.tracks, capped: pl.capped, cover: pl.cover };
+}
+
+async function profilePlaylists(user, { fetchFn, items = false } = {}) {
   const ids = await scrapeIds(user);
   const out = [];
-  for (const id of ids) out.push(await playlistInfo(id, fetchFn));
+  for (const id of ids) out.push(items ? await playlistPlan(id, fetchFn) : await playlistInfo(id, fetchFn));
   return out;
 }
 
@@ -124,4 +130,4 @@ function fit(infos, format, budget) {
   return { sizes, total, fits: total <= budget };
 }
 
-module.exports = { playlistTracks, playlistId, toCsv, parseEmbedFull, scrapeInElectron, parseProfile, parseEmbed, playlistInfo, profilePlaylists, bytesFor, fit, RATES, DEFAULT_BUDGET, DEFAULT_FORMAT };
+module.exports = { playlistPlan, playlistTracks, playlistId, toCsv, parseEmbedFull, scrapeInElectron, parseProfile, parseEmbed, playlistInfo, profilePlaylists, bytesFor, fit, RATES, DEFAULT_BUDGET, DEFAULT_FORMAT };

@@ -1,4 +1,5 @@
 'use strict';
+process.env.PYTHONDONTWRITEBYTECODE = '1';   // tests must never write __pycache__ into resources/python (it would break the app's signature)
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -351,4 +352,11 @@ test('fileGroup with an AAC converter: the iPod gets Title - Artist.m4a and its 
   const bad = () => { throw new Error('boom'); }; bad.ext = '.m4a';
   const r2 = library.fileGroup({ staging: stage2, name: 'Q', ipodDir: ipod, libraryDir: lib, saveToLibrary: true, convert: bad });
   assert.ok(fs.existsSync(path.join(lib, 'Q', 'x.flac'))); assert.match(r2.notes[0], /could not make an iPod copy/);
+});
+
+test('the iPod helper uses the bundled Python, with every library it needs', () => {
+  const ipod = require('../src/ipod');
+  assert.ok(ipod.BUNDLED, 'resources/python is missing: run tools/make-python.sh');
+  const r = require('child_process').spawnSync(ipod.BUNDLED, ['-I', '-B', '-c', 'import pygpod, usb, mutagen, libusb_package; print("ok")'], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.match(r.stdout, /ok/, r.stderr);
 });

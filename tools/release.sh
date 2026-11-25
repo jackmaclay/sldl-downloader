@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="dist/mac-arm64/myPod.app"
 rm -rf dist
+[ -x resources/python/bin/python3 ] || tools/make-python.sh
 npx electron-builder --mac dir --arm64
 ditto -c -k --keepParent "$APP" dist/app.zip
 xcrun notarytool submit dist/app.zip --keychain-profile notary --wait

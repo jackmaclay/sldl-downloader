@@ -8,7 +8,11 @@ const path = require('path');
 const { AUDIO } = require('./sldl');
 
 const VENV = path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config', 'sldl'), 'venv');
-const PY = path.join(VENV, 'bin', 'python');
+// The app ships its own Python (resources/python: pygpod, pyusb, libusb). The venv is only a fallback for old setups.
+const BUNDLED = [process.resourcesPath && path.join(process.resourcesPath, 'python', 'bin', 'python3'), path.join(__dirname, '..', 'resources', 'python', 'bin', 'python3')]
+  .filter(Boolean).find((p) => fs.existsSync(p));
+const PY = BUNDLED || path.join(VENV, 'bin', 'python');
+const PYENV = { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' };   // never write into the signed app or read the user's own packages
 // Python cannot read inside app.asar; electron-builder unpacks tools/ next to it.
 const SCRIPT = path.join(__dirname, '..', 'tools', 'ipod_add.py').replace('app.asar', 'app.asar.unpacked');
 const CATALOG = path.join(__dirname, '..', 'tools', 'ipod_catalog.py').replace('app.asar', 'app.asar.unpacked');
@@ -22,6 +26,7 @@ const sh = (cmd, args) => new Promise((resolve, reject) => {
 
 // One-off: private Python env with pygpod. Needs network once.
 async function setup() {
+  if (BUNDLED) return { bundled: BUNDLED };
   if (!ready()) await sh('/usr/bin/python3', ['-m', 'venv', VENV]);
   await sh(PY, ['-m', 'pip', 'install', '-q', 'pygpod[tags]', 'pyusb', 'libusb-package']);
   return { venv: VENV };
@@ -38,7 +43,7 @@ function addToIpod({ mount, guid, playlist, files, folder, onEvent = () => {} })
     const list = files.filter((f) => AUDIO.test(f));
     const hasLinks = !!folder && fs.existsSync(path.join(folder, '.links.json'));   // songs the iPod already has, to link into the playlist
     if (!list.length && !hasLinks) return reject(new Error('No audio files to add.'));
-    const p = spawn(PY, [SCRIPT, mount, playlist || '', guid, ...list], { env: { ...process.env, ...(folder ? { SLDL_FOLDER: folder } : {}) } });
+    const p = spawn(PY, [SCRIPT, mount, playlist || '', guid, ...list], { env: { ...process.env, ...PYENV, ...(folder ? { SLDL_FOLDER: folder } : {}) } });
     let done = null; let errText = ''; let buf = '';
     p.stdout.on('data', (d) => {
       buf += d;
@@ -56,7 +61,7 @@ function addToIpod({ mount, guid, playlist, files, folder, onEvent = () => {} })
 // What is on a mounted iPod (read-only), as { tracks:[{title, artist, seconds, playlists}], films }.
 function readCatalog(mount) {
   return new Promise((resolve, reject) => {
-    execFile(PY, [CATALOG, mount], { maxBuffer: 64e6, timeout: 120000 }, (err, so, se) => {
+    execFile(PY, [CATALOG, mount], { maxBuffer: 64e6, timeout: 120000, env: { ...process.env, ...PYENV } }, (err, so, se) => {
       if (err) return reject(new Error((se || err.message).trim().split('\n').pop()));
       try { resolve(JSON.parse(so.trim().split('\n').pop())); } catch { reject(new Error('Could not read the iPod song list.')); }
     });
@@ -73,7 +78,7 @@ async function reconnect(serial, { waitMs = 25000, list } = {}) {
   if (!d) throw new Error('That iPod is not on USB. Unplug it and plug it back in.');
   if (d.volume) return d; // already mounted
   if (!ready()) throw new Error('The iPod helper is not installed. Run: sldl-dl ipod-setup');
-  const out = await new Promise((resolve) => execFile(PY, [RECONNECT, String(serial)], { timeout: 30000 }, (err, so) => resolve(so || '')));
+  const out = await new Promise((resolve) => execFile(PY, [RECONNECT, String(serial)], { timeout: 30000, env: { ...process.env, ...PYENV } }, (err, so) => resolve(so || '')));
   let r = {}; try { r = JSON.parse(out.trim().split('\n').pop()); } catch { /* none */ }
   if (!r.ok) throw new Error(r.error || 'The USB reset did not work. Unplug it and plug it back in.');
   for (const t0 = Date.now(); Date.now() - t0 < waitMs;) { await sleep(1500); const cur = await find(); if (cur && cur.volume) return cur; }
@@ -117,4 +122,4 @@ async function withMounted(serial, fn, { autoEject = true, list, reconnectFn = r
 // Mount it, refresh the stored song list, eject: nothing is written.
 const scan = (serial, opts) => withMounted(serial, async (d) => d, opts);
 
-module.exports = { setup, addToIpod, reconnect, eject, resolveDevice, withMounted, scan, readCatalog, ready, guidOf, VENV };
+module.exports = { setup, addToIpod, reconnect, eject, resolveDevice, withMounted, scan, readCatalog, ready, guidOf, VENV, BUNDLED };

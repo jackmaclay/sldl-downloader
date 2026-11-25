@@ -247,6 +247,7 @@ async function main() {
   }
 
   if (cmd === 'ipod-setup') {
+    if (ipod.BUNDLED) return console.log('The iPod helper is built in. Nothing to install.');
     console.log('Installing the iPod helper (pygpod) into ' + ipod.VENV + ' ...');
     await ipod.setup(); return console.log('Done.');
   }
@@ -263,7 +264,7 @@ async function main() {
     for (const [k, v] of checks) console.log(`${k.padEnd(20)} ${v}`);
     const list = await devices.list();
     console.log(`${'iPod'.padEnd(20)} ${list.length ? list.map((d) => `${d.model} (${d.status})`).join(', ') : 'not connected'}`);
-    console.log(`${'iPod helper'.padEnd(20)} ${ipod.ready() ? 'installed' : 'missing (sldl-dl ipod-setup)'}`);
+    console.log(`${'iPod helper'.padEnd(20)} ${ipod.ready() ? (ipod.BUNDLED ? 'built in' : 'installed') : 'missing (sldl-dl ipod-setup)'}`);
     const src = await devices.musicSources();
     console.log(`${'Music.app sees'.padEnd(20)} ${src.ok ? src.sources.join(', ') : src.error}`);
     return;

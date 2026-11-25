@@ -189,9 +189,14 @@ $('cancel').addEventListener('click', () => { cancelled = true; window.api.cance
 window.api.getSettings().then((c) => { $('save-lib').checked = !!c.saveToLibrary; $('format').value = c.defaultFormat || 'mp3'; }).catch(() => {});
 
 /* ---------- send ---------- */
-function syncRouteUi() {
-  const copy = $('route').value === 'copy';
-  $('dest-row').hidden = !copy; $('layout-row').hidden = !copy;
+async function syncRouteUi() {
+  const route = $('route').value; const copy = route === 'copy';
+  $('dest-row').hidden = !copy; $('layout-row').hidden = !copy; $('ipod-row').hidden = route !== 'ipod';
+  if (route === 'ipod') { // every iPod on USB, mounted or not: the app mounts the chosen one only for the upload
+    const keep = $('ipod-pick').value; const list = (await window.api.devices()).filter((d) => d.status !== 'recovery');
+    $('ipod-pick').replaceChildren(...list.map((d) => { const o = new Option(`${d.model}${d.volume ? '' : ' (ejected, will mount for the upload)'}`, d.serial); o.selected = d.serial === keep; return o; }));
+    if (!list.length) $('ipod-pick').appendChild(new Option('No iPod plugged in', ''));
+  }
 }
 $('route').addEventListener('change', syncRouteUi);
 $('pick-dest').addEventListener('click', async () => {
@@ -211,13 +216,18 @@ $('send').addEventListener('click', async () => {
     }
     const folders = state.folders.length ? state.folders : [state.folder];
     const sum = { added: 0, skipped: 0, of: 0, copied: 0 };
+    if (route === 'ipod') { // one mount for the whole batch, then it is ejected again
+      note.textContent = 'Mounting the iPod...';
+      const r = await window.api.send({ folders, route, serial: $('ipod-pick').value, name: $('name').value.trim() || undefined });
+      note.className = 'note ok'; note.textContent = `${r.model} updated: ${r.added} added, ${r.skipped} already there. ${r.ejected ? 'Ejected, safe to unplug.' : 'Still mounted: eject it before unplugging.'}`;
+      return;
+    }
     for (const folder of folders) {
       const r = await window.api.send({ folder, route, dest: state.dest, name: folders.length === 1 ? ($('name').value.trim() || undefined) : undefined, layout: $('layout').value });
       for (const k of Object.keys(sum)) sum[k] += r[k] || 0;
     }
     note.className = 'note ok';
-    note.textContent = route === 'ipod' ? `iPod updated: ${sum.added} added, ${sum.skipped} already there. Eject it before unplugging.`
-      : route === 'music' ? `Added ${sum.added} of ${sum.of} tracks to Music.` : `Copied ${sum.copied} files.`;
+    note.textContent = route === 'music' ? `Added ${sum.added} of ${sum.of} tracks to Music.` : `Copied ${sum.copied} files.`;
   } catch (err) { note.className = 'note err'; note.textContent = clean(err); }
   finally { $('send').disabled = false; }
 });
@@ -243,6 +253,7 @@ async function loadDevices() {
       card.append(text('div', '', `${d.volume.mount}  ·  ${gb(d.volume.free)} GB free of ${gb(d.volume.total)} GB`));
       if (d.volume.flags.length) { const ul = document.createElement('ul'); d.volume.flags.forEach((f) => ul.appendChild(text('li', 'warn', f))); card.appendChild(ul); }
     }
+    if (d.last) card.append(text('div', '', `Last seen: ${GB(d.last.free)} GB free of ${GB(d.last.total)} GB`));
     if (EXPLAIN[d.status]) card.appendChild(text('div', 'explain', EXPLAIN[d.status]));
     if (d.status !== 'recovery') { // mounted: Eject. Ejected but still on USB: Reconnect (no unplugging).
       const b = text('button', 'btn', d.volume ? 'Eject' : 'Reconnect');
@@ -300,7 +311,7 @@ $('s-flac').addEventListener('change', () => applyFlac($('s-flac').checked));
 async function loadSettings() {
   const c = await window.api.getSettings();
   $('s-user').value = c.user || ''; $('s-pass').value = c.pass || '';
-  applyFlac(c.allowFlac); $('s-flac').checked = !!c.allowFlac;
+  applyFlac(c.allowFlac); $('s-flac').checked = !!c.allowFlac; $('s-eject').checked = c.autoEject !== false;
   $('s-path').textContent = c.path || 'Not set'; $('s-format').value = c['pref-format'] || 'mp3';
   if (!$('s-format').value) $('s-format').value = 'mp3';
   $('s-namefmt').value = c['name-format'] || ''; $('s-note').textContent = '';
@@ -310,7 +321,7 @@ $('s-save').addEventListener('click', async () => {
   const path = $('s-path').textContent;
   await window.api.saveSettings({
     user: $('s-user').value, pass: $('s-pass').value, path: path === 'Not set' ? '' : path,
-    'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value, allowFlac: $('s-flac').checked,
+    'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value, allowFlac: $('s-flac').checked, autoEject: $('s-eject').checked,
   });
   $('s-note').className = 'note ok'; $('s-note').textContent = 'Saved.';
 });

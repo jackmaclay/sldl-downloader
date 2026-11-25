@@ -10,6 +10,7 @@ const spotify = require('./src/spotify');
 const prefs = require('./src/prefs');
 const plan = require('./src/plan');
 const dedupe = require('./src/dedupe');
+const known = require('./src/known');
 const os = require('os');
 
 let win;
@@ -36,7 +37,7 @@ app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWind
 
 const push = (data) => { if (win && !win.isDestroyed()) win.webContents.send('dl:event', data); };
 
-const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat }; };
+const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat, autoEject: p.autoEject }; };
 ipcMain.handle('settings:get', () => ({ ...conf.redact(conf.read()), ...appPrefs() }));
 ipcMain.handle('settings:save', (_e, values) => {
   const clean = {};
@@ -44,7 +45,7 @@ ipcMain.handle('settings:save', (_e, values) => {
   if (clean.pass === '********') delete clean.pass; // unchanged
   conf.write(clean);
   const pv = {};
-  for (const k of ['allowFlac', 'saveToLibrary']) if (typeof values[k] === 'boolean') pv[k] = values[k];
+  for (const k of ['allowFlac', 'saveToLibrary', 'autoEject']) if (typeof values[k] === 'boolean') pv[k] = values[k];
   if (['mp3', 'flac'].includes(values.defaultFormat)) pv.defaultFormat = values.defaultFormat;
   if (Object.keys(pv).length) prefs.write(pv);
   return { ...conf.redact(conf.read()), ...appPrefs() };
@@ -53,11 +54,19 @@ ipcMain.handle('dialog:folder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Choose' });
   return r.canceled ? null : r.filePaths[0];
 });
-ipcMain.handle('devices:list', () => devices.list());
+ipcMain.handle('devices:list', async () => {
+  const list = await devices.list(); known.remember(list);
+  const k = known.lastKnown();
+  return list.map((d) => ({ ...d, last: !d.volume && k[d.serial] ? k[d.serial] : null })); // last seen free space while ejected
+});
 // How much room the connected player has (or a 16 GB iPod's worth when none is mounted).
 async function budgetInfo() {
-  const dev = (await devices.list()).find((d) => d.volume && d.volume.free);
-  return { budget: dev ? Math.floor(dev.volume.free * 0.97) : spotify.DEFAULT_BUDGET, budgetFrom: dev ? `${dev.model} (free space)` : 'a 16 GB iPod', rates: spotify.RATES };
+  const list = await devices.list(); known.remember(list);
+  const mounted = list.find((d) => d.volume && d.volume.free);
+  if (mounted) return { budget: Math.floor(mounted.volume.free * 0.97), budgetFrom: `${mounted.model} (free space)`, rates: spotify.RATES };
+  const k = known.lastKnown(); const seen = list.map((d) => k[d.serial]).filter(Boolean); // ejected iPods: the free space when last mounted
+  if (seen.length) { const low = seen.reduce((m, x) => (x.free < m.free ? x : m)); return { budget: Math.floor(low.free * 0.97), budgetFrom: `${low.model} (last known free space)`, rates: spotify.RATES }; }
+  return { budget: spotify.DEFAULT_BUDGET, budgetFrom: 'a 16 GB iPod', rates: spotify.RATES };
 }
 // A profile URL: its public playlists with their songs and size estimates.
 ipcMain.handle('profile:list', async (_e, { input }) => {
@@ -124,18 +133,27 @@ ipcMain.handle('download:start', async (_e, { input, format, name }) => {
 ipcMain.handle('download:cancel', () => { if (job && job.cancel) job.cancel(); });
 
 ipcMain.handle('send:run', async (_e, args) => { sending++; try { return await sendRun(args); } finally { sending--; } });
-async function sendRun({ folder, route, dest, name, layout, force }) {
+async function sendIpod({ folder, folders, name, serial }) {
+  const dev = ipod.resolveDevice(await devices.list(), serial);
+  const list = folders && folders.length ? folders : [folder];
+  const sum = { added: 0, skipped: 0, total: 0 };
+  const r = await ipod.withMounted(dev.serial, async (d) => {
+    for (const f of list) {
+      const tracks = sldl.listTracks(f);
+      const res = await ipod.addToIpod({
+        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: (list.length === 1 && name) || path.basename(f), files: tracks,
+        onEvent: (e) => { if (e.type === 'track') push({ type: 'copy', done: e.n, total: e.of }); },
+      });
+      sum.added += res.added; sum.skipped += res.skipped; sum.total = res.total;
+    }
+    return sum;
+  }, { autoEject: prefs.read().autoEject });
+  return { route: 'ipod', ...r, ejected: prefs.read().autoEject, model: dev.model };
+}
+async function sendRun({ folder, folders, route, dest, name, layout, force, serial }) {
+  if (route === 'ipod') return sendIpod({ folder, folders, name, serial });
   const tracks = sldl.listTracks(folder);
   const plName = name || path.basename(folder);
-  if (route === 'ipod') {
-    const d = (await devices.list()).find((x) => x.volume && x.status !== 'recovery');
-    if (!d) throw new Error('No mounted iPod found. Plug it in and wait for it to mount.');
-    const r = await ipod.addToIpod({
-      mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: plName, files: tracks,
-      onEvent: (e) => { if (e.type === 'track') push({ type: 'copy', done: e.n, total: e.of }); },
-    });
-    return { route, ...r };
-  }
   if (route === 'music') return { route, ...(await sync.addToMusic(plName, tracks)) };
   const refuse = sync.refuseStockIpod(dest);
   if (refuse && !force) throw new Error(refuse);

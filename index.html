@@ -58,6 +58,7 @@
         <div class="g">
           <div class="fr"><label for="route">How</label>
             <select id="route"><option value="ipod">Write to a connected iPod</option><option value="copy">Copy to a player or folder</option><option value="music">Add to Music app</option></select></div>
+          <div class="fr" id="ipod-row"><label for="ipod-pick">Which iPod</label><select id="ipod-pick"></select></div>
           <div class="fr" id="dest-row"><label>Destination</label><button class="link" id="pick-dest">Choose...</button></div>
           <div class="fr" id="layout-row"><label for="layout">Layout</label>
             <select id="layout"><option value="rockbox">Music/&lt;playlist&gt; plus Playlists/ (Rockbox)</option><option value="flat">Flat, files in the folder</option></select></div>
@@ -89,6 +90,7 @@
         <div class="fr"><label for="s-format">Preferred format</label>
           <select id="s-format"><option>mp3</option><option>m4a</option></select></div>
         <div class="fr"><label for="s-flac">Allow FLAC</label><input id="s-flac" type="checkbox"></div>
+        <div class="fr"><label for="s-eject">Eject iPod after sending</label><input id="s-eject" type="checkbox"></div>
         <div class="fr"><label for="s-namefmt">File names</label><input id="s-namefmt" placeholder="{artist} - {title}" spellcheck="false"></div>
       </div>
       <div class="bar"><button class="btn primary" id="s-save">Save</button><span class="note" id="s-note"></span></div>

@@ -231,3 +231,34 @@ test('ipod.reconnect: returns an already mounted iPod untouched, and refuses one
   await assert.rejects(ipod.reconnect('ZZZ', { list: async () => [mounted] }), /not on USB/);
   await assert.rejects(ipod.eject('/etc'), /Not an iPod volume/);                                   // never ejects anything outside /Volumes
 });
+
+test('ipod.withMounted: mounts an ejected iPod, runs, then ejects, even when the work fails', async () => {
+  const ipod = require('../src/ipod'); const calls = [];
+  let mounted = false;
+  const dev = () => ({ model: 'iPod classic', serial: 'S1', volume: mounted ? { mount: '/Volumes/iPod' } : null });
+  const opts = { list: async () => [dev()], reconnectFn: async () => { calls.push('mount'); mounted = true; return dev(); }, ejectFn: async (m) => { calls.push('eject ' + m); mounted = false; } };
+  assert.strictEqual(await ipod.withMounted('s1', async (d) => { calls.push('work ' + d.volume.mount); return 42; }, opts), 42);
+  assert.deepStrictEqual(calls, ['mount', 'work /Volumes/iPod', 'eject /Volumes/iPod']);
+  calls.length = 0;
+  await assert.rejects(ipod.withMounted('S1', async () => { throw new Error('boom'); }, opts), /boom/);
+  assert.deepStrictEqual(calls, ['mount', 'eject /Volumes/iPod']);                    // still ejected after a failure
+  calls.length = 0;
+  await ipod.withMounted('S1', async () => 1, { ...opts, autoEject: false });
+  assert.deepStrictEqual(calls, ['mount']);                                            // setting off: stays mounted
+});
+
+test('ipod.resolveDevice: one iPod is picked automatically, two need a choice', () => {
+  const ipod = require('../src/ipod');
+  const c = { model: 'iPod classic', serial: 'A1', status: 'unmounted' }; const n = { model: 'iPod nano 4G', serial: 'B2', status: 'ready' };
+  assert.strictEqual(ipod.resolveDevice([c], ''), c);
+  assert.throws(() => ipod.resolveDevice([c, n], ''), /More than one iPod/);
+  assert.strictEqual(ipod.resolveDevice([c, n], 'nano'), n); assert.strictEqual(ipod.resolveDevice([c, n], 'a1'), c);
+  assert.throws(() => ipod.resolveDevice([], ''), /No iPod is plugged in/);
+});
+
+test('known: remembers free space of a mounted iPod', () => {
+  process.env.SLDL_HOME = tmp(); const known = require('../src/known');
+  known.remember([{ serial: 'S1', model: 'iPod nano 4G', volume: { free: 5e9, total: 16e9 } }, { serial: 'S2', model: 'x', volume: null }]);
+  const k = known.lastKnown(); assert.strictEqual(k.S1.free, 5e9); assert.strictEqual(k.S2, undefined);
+  delete process.env.SLDL_HOME;
+});

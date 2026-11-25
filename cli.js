@@ -17,7 +17,7 @@ const HELP = `sldl-dl: download Spotify playlists from Soulseek and put them on 
 
 Usage
   sldl-dl download <spotify-url|search> [--out DIR] [--format mp3|m4a|flac] [--name NAME]
-                                         [--ipod] [--music] [--to DEST] [--layout rockbox|flat]
+                                         [--ipod [--device classic|nano]] [--music] [--to DEST] [--layout rockbox|flat]
                                          [--playlists 1,3] [--limit-gb N]   (profile links only)
                                          [--no-library] [--only DIR]        (Spotify links: skip the Music folder copy / keep ONLY in DIR)
   Profile links (open.spotify.com/user/...) download every public playlist if it all fits the
@@ -34,7 +34,8 @@ Usage
 
 Flags
   --json     machine-readable output (one JSON object per line)
-  --ipod     write the playlist into a connected stock iPod's library (writes to the iPod)
+  --ipod     write the playlist into a plugged-in stock iPod's library. It is mounted only for the upload and ejected after.
+             With more than one iPod plugged in, say which: --device classic|nano
   --music    add the playlist to Music.app after downloading
   --to DEST  copy the playlist to a mounted player or folder
 `;
@@ -60,17 +61,31 @@ function makeOut(json) {
   };
 }
 
+// iPod sends are collected and done once at the end of the command: the iPod is mounted, written and ejected in one go.
+const pendingIpod = []; let ctx = null;
+async function flushIpod() {
+  if (!ctx || !pendingIpod.length) return;
+  const { out, flags } = ctx;
+  const dev = ipod.resolveDevice(await devices.list(), flags.device);
+  out.info(`${dev.volume ? 'Writing to' : 'Mounting'} ${dev.model}${dev.volume ? '' : ' for the upload'}...`);
+  const prefsNow = prefs.read();
+  const r = await ipod.withMounted(dev.serial, async (d) => {
+    let last = null;
+    for (const p of pendingIpod) {
+      out.info(`--- ${p.name}: ${p.tracks.length} tracks`);
+      last = await ipod.addToIpod({
+        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: p.name, files: p.tracks,
+        onEvent: (e) => { if (e.type === 'track') out.info(`[${e.n}/${e.of}] ${e.status}: ${e.file}${e.msg ? ' (' + e.msg + ')' : ''}`, e); },
+      });
+    }
+    return last;
+  }, { autoEject: prefsNow.autoEject });
+  out.info(`${dev.model} now has ${r.total} tracks. ${prefsNow.autoEject ? 'Ejected, safe to unplug.' : 'Still mounted: eject it before unplugging (sldl-dl eject).'}`, { type: 'ipod', ...r });
+  pendingIpod.length = 0;
+}
+
 async function deliver(out, flags, folder, tracks, name) {
-  if (flags.ipod) {
-    const d = (await devices.list()).find((x) => x.volume && x.status !== 'recovery');
-    if (!d) throw new Error('No mounted iPod found. Plug it in and wait for it to mount.');
-    out.info(`Writing ${tracks.length} tracks to ${d.model} (${d.volume.mount})...`);
-    const r = await ipod.addToIpod({
-      mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: name, files: tracks,
-      onEvent: (e) => { if (e.type === 'track') out.info(`[${e.n}/${e.of}] ${e.status}: ${e.file}${e.msg ? ' (' + e.msg + ')' : ''}`, e); },
-    });
-    out.info(`iPod now has ${r.total} tracks (${r.added} added, ${r.skipped} already there). Eject it before unplugging.`, { type: 'ipod', ...r });
-  }
+  if (flags.ipod) pendingIpod.push({ name, tracks });
   if (flags.music) {
     out.info('Adding to Music.app...');
     const r = await sync.addToMusic(name, tracks);
@@ -116,6 +131,7 @@ async function main() {
   const [cmd = 'help', ...rest] = process.argv.slice(2);
   const { flags, pos } = parseArgs(rest);
   const out = makeOut(flags.json);
+  ctx = { out, flags };
 
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') return console.log(HELP);
 
@@ -238,4 +254,4 @@ async function main() {
   console.error(`Unknown command "${cmd}".\n\n${HELP}`); process.exitCode = 2;
 }
 
-main().catch((e) => { makeOut(process.argv.includes('--json')).err(e.message); process.exitCode = 1; });
+main().then(flushIpod).catch((e) => { makeOut(process.argv.includes('--json')).err(e.message); process.exitCode = 1; });

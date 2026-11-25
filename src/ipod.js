@@ -1,7 +1,7 @@
 'use strict';
 // Writes tracks into a stock iPod's library database (tools/ipod_add.py, pygpod in a private venv).
 // This is the only code that writes to an iPod. Callers must have Jack's say-so (see CLAUDE.md).
-const { execFile, spawn } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -76,4 +76,28 @@ function eject(mount) {
   });
 }
 
-module.exports = { setup, addToIpod, reconnect, eject, ready, guidOf, VENV };
+// Which iPod: `want` is a serial or part of the model name ("classic", "nano"). With no preference there must be exactly one on USB.
+function resolveDevice(devs, want) {
+  const live = devs.filter((d) => d.status !== 'recovery');
+  const w = String(want || '').toLowerCase();
+  const cand = w ? live.filter((d) => String(d.serial).toLowerCase() === w || d.model.toLowerCase().includes(w)) : live;
+  if (!cand.length) throw new Error(w ? `No iPod matching "${want}" is plugged in.` : 'No iPod is plugged in.');
+  if (cand.length > 1) throw new Error(`More than one iPod is plugged in (${cand.map((d) => d.model).join(', ')}). Choose which one.`);
+  return cand[0];
+}
+
+// An iPod only needs to be mounted while music is written to it. Mounts it (reconnect if it was ejected), runs fn(device), then
+// ejects it again, even if fn fails, so it spends as little time as possible exposed to an accidental unplug.
+async function withMounted(serial, fn, { autoEject = true, list, reconnectFn = reconnect, ejectFn = eject } = {}) {
+  const devices = require('./devices');
+  const find = async () => (await (list || devices.list)()).find((d) => String(d.serial).toUpperCase() === String(serial).toUpperCase());
+  let d = await find();
+  if (!d) throw new Error('That iPod is not on USB. Unplug it and plug it back in.');
+  if (!d.volume) d = await reconnectFn(serial, { list });
+  try { return await fn(d); }
+  finally {
+    if (autoEject) { try { try { execFileSync('/bin/sync'); } catch { /* best effort */ } await ejectFn(d.volume.mount); } catch { /* leave it mounted rather than fail the send */ } }
+  }
+}
+
+module.exports = { setup, addToIpod, reconnect, eject, resolveDevice, withMounted, ready, guidOf, VENV };

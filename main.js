@@ -25,7 +25,7 @@ function createWindow() {
     minWidth: 420, minHeight: 440,
     titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 },
     vibrancy: 'under-window', visualEffectState: 'active', backgroundColor: '#00000000', transparent: true,
-    title: 'SLDL Downloader',
+    title: 'myPod',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.loadFile(path.join(__dirname, 'index.html'));

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Command line for SLDL Downloader. Same code as the app: src/.
+// Command line for myPod. Same code as the app: src/.
 const path = require('path');
 const conf = require('./src/conf');
 const sldl = require('./src/sldl');

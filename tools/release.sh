@@ -3,7 +3,7 @@
 # (xcrun notarytool store-credentials notary --apple-id <id> --team-id <team-id>).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP="dist/mac-arm64/SLDL Downloader.app"
+APP="dist/mac-arm64/myPod.app"
 rm -rf dist
 npx electron-builder --mac dir --arm64
 ditto -c -k --keepParent "$APP" dist/app.zip

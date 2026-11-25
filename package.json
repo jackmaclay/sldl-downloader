@@ -1,7 +1,7 @@
 {
   "name": "sldl-downloader",
-  "productName": "SLDL Downloader",
-  "version": "3.5.0",
+  "productName": "myPod",
+  "version": "3.6.0",
   "description": "Download Spotify playlists via Soulseek and put them on a player",
   "main": "main.js",
   "scripts": {
@@ -41,7 +41,7 @@
       ],
       "icon": "build/icon.icns",
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "SLDL Downloader adds your downloaded playlists to the Music app."
+        "NSAppleEventsUsageDescription": "myPod adds your downloaded playlists to the Music app."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -49,7 +49,7 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
-      "title": "SLDL Downloader",
+      "title": "myPod",
       "icon": "build/icon.icns"
     },
     "win": {

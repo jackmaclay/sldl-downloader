@@ -1,4 +1,6 @@
-# SLDL Downloader
+# myPod
+
+The app is called myPod (the repository, the `sldl-dl` command and `~/.config/sldl` keep their names: sldl is the downloader underneath).
 
 Mac app and CLI. Paste a Spotify playlist URL, sldl downloads it from Soulseek, the files go into a playlist folder, and you can send them to a player.
 

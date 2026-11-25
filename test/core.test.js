@@ -300,3 +300,11 @@ test('withMounted refreshes the iPod song list before ejecting', async () => {
   assert.deepStrictEqual(order, ['work', 'catalog', 'eject']);
   assert.strictEqual(known.loadCatalog('S9').tracks.length, 1); delete process.env.SLDL_HOME;
 });
+
+test('prefs: the icon choice is saved and only original or alt are accepted', () => {
+  process.env.SLDL_HOME = tmp(); const prefs = require('../src/prefs');
+  assert.strictEqual(prefs.read().icon, 'original');
+  assert.strictEqual(prefs.write({ icon: 'alt' }).icon, 'alt'); assert.strictEqual(prefs.read().icon, 'alt');
+  assert.strictEqual(prefs.write({ icon: 'rainbow' }).icon, 'original');           // anything else falls back
+  delete process.env.SLDL_HOME;
+});

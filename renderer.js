@@ -366,4 +366,12 @@ $('s-save').addEventListener('click', async () => {
   });
   $('s-note').className = 'note ok'; $('s-note').textContent = 'Saved.';
 });
+// App icon: the sidebar logo changes here, the Dock icon in main.js (saved when picked, no Save needed).
+function applyIconUi(kind) {
+  const alt = kind === 'alt'; const img = document.querySelector('.brand img');
+  img.src = alt ? 'assets/icon-alt.png' : 'assets/icon.png'; img.classList.toggle('smooth', alt);
+  document.querySelectorAll('.iconbtn').forEach((b) => b.classList.toggle('on', b.dataset.icon === kind));
+}
+document.querySelectorAll('.iconbtn').forEach((b) => b.addEventListener('click', () => { applyIconUi(b.dataset.icon); window.api.saveSettings({ icon: b.dataset.icon }).catch(() => {}); }));
+window.api.getSettings().then((c) => applyIconUi(c.icon || 'original')).catch(() => {});
 $('slsk-link').addEventListener('click', () => window.api.openExternal('https://www.slsknet.org/'));

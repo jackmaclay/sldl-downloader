@@ -31,5 +31,7 @@ app.whenReady().then(async () => {
   wc.sendInputEvent({ type: 'mouseUp', x: 100, y: 300, button: 'left', clickCount: 1 }); await new Promise((r) => setTimeout(r, 300));
   console.log('drag test: sideW =', await js('sideW'), '| rail =', await js("document.body.classList.contains('rail')"), '| saved =', await js("localStorage.getItem('sideW')"));
   await js('sideW = 220; applySide();');
+  await js("document.querySelector('[data-page=settings]').click()"); await js("document.querySelector('.iconbtn[data-icon=alt]').click()"); await new Promise((r) => setTimeout(r, 600)); await snap('6-alt-icon');
+  console.log('icon saved:', await js("window.api.getSettings().then((c) => c.icon)"));
   app.quit();
 }).catch((e) => { console.error(e); process.exit(1); });

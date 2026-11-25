@@ -1,6 +1,7 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const conf = require('./src/conf');
 const sldl = require('./src/sldl');
 const devices = require('./src/devices');
@@ -31,13 +32,22 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 
-app.whenReady().then(createWindow);
+// The Dock icon follows the Settings choice while the app runs. The icon in Finder and Applications is baked into the app and does not change.
+function applyIcon() {
+  if (process.platform !== 'darwin' || !app.dock) return;
+  try {
+    if (prefs.read().icon === 'alt') { app.dock.setIcon(nativeImage.createFromBuffer(fs.readFileSync(path.join(__dirname, 'assets', 'icon-alt.png')))); return; }
+    const own = [path.join(process.resourcesPath || '', 'icon.icns'), path.join(__dirname, 'build', 'icon.icns')].find((p) => fs.existsSync(p)); // the app's own icon
+    if (own) app.dock.setIcon(nativeImage.createFromPath(own));
+  } catch { /* the icon is cosmetic */ }
+}
+app.whenReady().then(() => { createWindow(); applyIcon(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 
 const push = (data) => { if (win && !win.isDestroyed()) win.webContents.send('dl:event', data); };
 
-const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat, autoEject: p.autoEject }; };
+const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat, autoEject: p.autoEject, icon: p.icon }; };
 ipcMain.handle('settings:get', () => ({ ...conf.redact(conf.read()), ...appPrefs() }));
 ipcMain.handle('settings:save', (_e, values) => {
   const clean = {};
@@ -47,7 +57,9 @@ ipcMain.handle('settings:save', (_e, values) => {
   const pv = {};
   for (const k of ['allowFlac', 'saveToLibrary', 'autoEject']) if (typeof values[k] === 'boolean') pv[k] = values[k];
   if (['mp3', 'flac'].includes(values.defaultFormat)) pv.defaultFormat = values.defaultFormat;
+  if (['original', 'alt'].includes(values.icon)) pv.icon = values.icon;
   if (Object.keys(pv).length) prefs.write(pv);
+  if (pv.icon) applyIcon();
   return { ...conf.redact(conf.read()), ...appPrefs() };
 });
 ipcMain.handle('dialog:folder', async () => {

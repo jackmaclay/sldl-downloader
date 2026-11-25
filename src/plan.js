@@ -11,8 +11,16 @@ const { EventEmitter } = require('events');
 const sldl = require('./sldl');
 const spotify = require('./spotify');
 const library = require('./library');
+const dedupe = require('./dedupe');
 const conf = require('./conf');
 const prefs = require('./prefs');
+
+// Names and album details for every file in a folder: the file's own tags, with sldl's index (the Spotify title and artist) winning.
+async function metaFor(folder, indexMeta = {}) {
+  const meta = {};
+  for (const f of library.listAudio(folder)) { const n = path.basename(f); meta[n] = { ...(await dedupe.readTagsFull(f)), ...(indexMeta[n] || {}) }; }
+  return meta;
+}
 
 const slug = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'Playlist';
 
@@ -33,8 +41,7 @@ function runPlaylist(opts) {
     if (!items.length) throw new Error('Nothing to download.');
     const groups = { mp3: items.filter((i) => i.format !== 'flac'), flac: items.filter((i) => i.format === 'flac') };
     if (groups.flac.length && !saveToLibrary) throw new Error('FLAC is kept in your Music folder. Turn on "Also save to my Music folder" to use it.');
-    let convert = opts.convert;
-    if (convert === undefined) { const bin = library.findFfmpeg(); convert = bin ? library.ffmpegToMp3(bin) : null; }
+    const convert = opts.convert !== undefined ? opts.convert : library.macConverter();   // lossless -> AAC for the iPod, with macOS's own converter
     const name = slug(opts.name);
     const totals = { total: 0, done: 0, failed: 0 }; const sum = { cloned: 0, copied: 0, converted: 0, reused: 0, notes: [] };
     const linkOnly = []; // songs the iPod already has: no download, just linked into this playlist at upload time
@@ -51,7 +58,7 @@ function runPlaylist(opts) {
           if (have.length) {
             fs.mkdirSync(reuseDir);
             for (const [i, f] of have) { library.clone(f, library.unique(path.join(reuseDir, path.basename(f)))); ev.emit('reused', { type: 'reused', track: `${i.artist} - ${i.title}`, from: f }); }
-            absorb(library.fileGroup({ staging: reuseDir, name, ipodDir, libraryDir, saveToLibrary, convert }));
+            absorb(library.fileGroup({ staging: reuseDir, name, ipodDir, libraryDir, saveToLibrary, convert, meta: await metaFor(reuseDir) }));
             sum.reused += have.length;
           }
         }
@@ -70,7 +77,7 @@ function runPlaylist(opts) {
           for (const t of ['line', 'total', 'searching', 'progress', 'done', 'failed']) current.on(t, (e, counts) => ev.emit(t, t === 'line' ? e : { ...e, group: fmt }, counts));
           const r = await current.done;
           totals.total += r.total; totals.done += r.done; totals.failed += r.failed;
-          if (r.folder) absorb(library.fileGroup({ staging: r.folder, name, ipodDir, libraryDir, saveToLibrary, convert, meta: library.readIndex(r.folder) }));
+          if (r.folder) absorb(library.fileGroup({ staging: r.folder, name, ipodDir, libraryDir, saveToLibrary, convert, meta: await metaFor(r.folder, library.readIndex(r.folder)) }));
         }
       } finally { fs.rmSync(staging, { recursive: true, force: true }); }
     }

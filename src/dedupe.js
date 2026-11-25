@@ -34,6 +34,16 @@ async function readTags(file) {
   return fromName(file);
 }
 
+// Everything the iPod wants to know about a song: title, artist, album, genre, year, track number.
+async function readTagsFull(file) {
+  try {
+    mm = mm || (await import('music-metadata'));
+    const r = await mm.parseFile(file, { duration: false, skipCovers: true }); const c = r.common;
+    if (c.title) return { title: c.title, artist: c.artist || (c.artists || [])[0] || '', album: c.album || '', genre: (c.genre || [])[0] || '', year: c.year || 0, track: (c.track && c.track.no) || 0 };
+  } catch { /* fall back to the name */ }
+  return { ...fromName(file), album: '', genre: '', year: 0, track: 0 };
+}
+
 function walk(dir, out = []) {
   let names = [];
   try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
@@ -81,4 +91,4 @@ async function buildIndex(dirs, opts = {}) {
   return index;
 }
 
-module.exports = { buildIndex, keyOf, baseTitle, fromName, LOSSLESS };
+module.exports = { buildIndex, keyOf, baseTitle, fromName, readTagsFull, LOSSLESS };

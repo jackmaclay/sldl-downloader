@@ -176,7 +176,7 @@ function refreshPlanner(msg) {
   });
   const sel = plan.playlists.filter((p) => p.on);
   const fresh = sel.reduce((n, p) => n + p.items.filter((it) => !it.have && !it.ipod).length, 0);
-  $('pick-cap').textContent = `Playlists: ${GB(used)} of ${GB(plan.budget)} GB on the iPod (MP3)`;
+  $('pick-cap').textContent = `Playlists: ${GB(used)} of ${GB(plan.budget)} GB on the iPod`;
   $('pick-go').textContent = fresh ? `Download ${fresh} new song${fresh > 1 ? 's' : ''}` : 'Add to folders';
   $('pick-go').disabled = !sel.length;
   const serial = $('for-ipod').value; const age = plan.catalog ? Math.round((Date.now() - plan.catalog.at) / 86400000) : null;
@@ -360,7 +360,7 @@ const lastName = (p) => String(p).split('/').filter(Boolean).pop() || p;
 function showWhere() {
   const w = $('where'); w.replaceChildren();
   const b = (t) => { const e = document.createElement('b'); e.textContent = t; return e; };
-  w.append('MP3s for your iPod are saved in ', b(lastName(S.ipod)));
+  w.append('iPod-ready songs are saved in ', b(lastName(S.ipod)));
   if ($('save-lib').checked) w.append(', and a best-quality copy in ', b(lastName(S.lib)));
   w.append('. You can change these in Settings.');
 }

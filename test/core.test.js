@@ -196,7 +196,7 @@ test('runPlaylist: songs already on the Mac are reused, not downloaded again; fo
   const r = await plan.runPlaylist({ name: 'Mine', items, saveToLibrary: true, libraryDir: lib, ipodDir: ipod, index, download, convert }).done;
   assert.deepStrictEqual(asked, [{ format: 'mp3', rows: 1 }, { format: 'flac,mp3', rows: 1 }]); // "Have It" was NOT requested
   assert.strictEqual(r.reused, 1); assert.strictEqual(r.done, 2);
-  assert.deepStrictEqual(fs.readdirSync(path.join(ipod, 'Mine')).sort(), ['Have It - Band.mp3', 'Lossless - Band.mp3', 'New One - Band.mp3']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(ipod, 'Mine')).filter((f) => !f.startsWith('.')).sort(), ['Have It - Band.mp3', 'Lossless - Band.mp3', 'New One - Band.mp3']);
   assert.deepStrictEqual(fs.readdirSync(path.join(lib, 'Mine')).sort(), ['Have It - Band.mp3', 'Lossless - Band.flac', 'New One - Band.mp3']);
   // a second playlist wanting the same songs downloads nothing
   asked.length = 0;
@@ -221,7 +221,7 @@ test('files are named from Spotify data, and the iPod gets proper title and arti
   const want = 'Spooky - Recorded at RAK Studios, London - Maribou State, Holly Walker.mp3';
   assert.ok(fs.existsSync(path.join(ipod, 'P', want)) && fs.existsSync(path.join(lib, 'P', want)));
   const side = JSON.parse(fs.readFileSync(path.join(ipod, 'P', '.tags.json'), 'utf8'));
-  assert.deepStrictEqual(side[path.basename(want, '.mp3')], { title: 'Spooky - Recorded at RAK Studios, London', artist: 'Maribou State, Holly Walker' });
+  assert.deepStrictEqual(side[path.basename(want, '.mp3')], { title: 'Spooky - Recorded at RAK Studios, London', artist: 'Maribou State, Holly Walker', album: '', genre: '', year: 0, track: 0 });
 });
 
 test('ipod.reconnect: returns an already mounted iPod untouched, and refuses one that is not on USB', async () => {
@@ -315,10 +315,40 @@ test('folders: iPod folder from sldl.conf or a friendly default, Music folder fr
   delete require.cache[require.resolve('../src/folders')];
   const folders = require('../src/folders'); const prefs = require('../src/prefs');
   assert.strictEqual(folders.ipodDir(), folders.DEFAULT_IPOD);                          // nothing set: the default
-  assert.match(folders.DEFAULT_IPOD, /myPod[\\/]For iPod \(MP3\)$/);
+  assert.match(folders.DEFAULT_IPOD, /myPod[\\/]For iPod$/);
   assert.strictEqual(folders.libraryDir(), prefs.DEFAULT_LIBRARY); assert.match(prefs.DEFAULT_LIBRARY, /myPod[\\/]Music \(best quality\)$/);
   fs.writeFileSync(process.env.SLDL_CONF, 'path = /somewhere/ipod\n'); prefs.write({ libraryDir: '/somewhere/music' });
   assert.strictEqual(folders.ipodDir(), '/somewhere/ipod'); assert.strictEqual(folders.libraryDir(), '/somewhere/music');   // chosen folders win
   if (old.conf === undefined) delete process.env.SLDL_CONF; else process.env.SLDL_CONF = old.conf;
   if (old.home === undefined) delete process.env.SLDL_HOME; else process.env.SLDL_HOME = old.home;
+});
+
+test('macOS converter: a lossless file becomes a 256 kbps, 44.1 kHz AAC .m4a for the iPod', { skip: process.platform !== 'darwin' }, () => {
+  const { execFileSync } = require('child_process'); const library = require('../src/library');
+  const conv = library.macConverter(); assert.ok(conv); assert.strictEqual(conv.ext, '.m4a');
+  const d = tmp(); const wav = path.join(d, 'in.wav'); const n = 44100 * 2; const buf = Buffer.alloc(44 + n * 4);   // 2 s of 96 kHz stereo silence
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 4, 4); buf.write('WAVEfmt ', 8); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(96000, 24); buf.writeUInt32LE(96000 * 4, 28); buf.writeUInt16LE(4, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 4, 40);
+  fs.writeFileSync(wav, buf); const out = path.join(d, 'out.m4a'); conv(wav, out);
+  assert.ok(fs.statSync(out).size > 1000);
+  const info = execFileSync('/usr/bin/afinfo', [out], { encoding: 'utf8' });
+  assert.match(info, /aac/i); assert.match(info, /44100/);                           // AAC, and never above what iPods play
+});
+
+test('fileGroup with an AAC converter: the iPod gets Title - Artist.m4a and its details, the library keeps the FLAC', () => {
+  const library = require('../src/library'); const stage = tmp(); const ipod = tmp(); const lib = tmp();
+  fs.writeFileSync(path.join(stage, 'junk name.flac'), 'flacdata');
+  const convert = (src, out) => fs.writeFileSync(out, 'aac:' + fs.readFileSync(src, 'utf8')); convert.ext = '.m4a';
+  const meta = { 'junk name.flac': { title: 'Don\'t Let Go', artist: 'SuperShy', album: 'Single', genre: 'Dance', year: 2022, track: 1 } };
+  const r = library.fileGroup({ staging: stage, name: 'P', ipodDir: ipod, libraryDir: lib, saveToLibrary: true, convert, meta });
+  assert.deepStrictEqual(fs.readdirSync(path.join(ipod, 'P')).filter((f) => !f.startsWith('.')), ["Don't Let Go - SuperShy.m4a"]);
+  assert.strictEqual(fs.readFileSync(path.join(lib, 'P', "Don't Let Go - SuperShy.flac"), 'utf8'), 'flacdata');
+  assert.strictEqual(r.converted, 1);
+  const side = JSON.parse(fs.readFileSync(path.join(ipod, 'P', '.tags.json'), 'utf8'));
+  assert.deepStrictEqual(side["Don't Let Go - SuperShy"], { title: "Don't Let Go", artist: 'SuperShy', album: 'Single', genre: 'Dance', year: 2022, track: 1 });
+  // a converter that fails keeps the library original and reports, instead of losing the song
+  const stage2 = tmp(); fs.writeFileSync(path.join(stage2, 'x.flac'), 'f');
+  const bad = () => { throw new Error('boom'); }; bad.ext = '.m4a';
+  const r2 = library.fileGroup({ staging: stage2, name: 'Q', ipodDir: ipod, libraryDir: lib, saveToLibrary: true, convert: bad });
+  assert.ok(fs.existsSync(path.join(lib, 'Q', 'x.flac'))); assert.match(r2.notes[0], /could not make an iPod copy/);
 });

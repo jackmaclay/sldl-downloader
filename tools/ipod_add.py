@@ -99,7 +99,14 @@ def main():
                 skipped += 1
                 emit(type="track", n=i, of=len(files), file=name, status="already there")
                 continue
-            t = db.add_track(path, convert=True, **({"title": meta["title"], "artist": meta.get("artist", "")} if meta.get("title") else {}))
+            extra = {}
+            if meta.get("title"):
+                extra = {"title": meta["title"], "artist": meta.get("artist", "")}
+                for k_src, k_dst in (("album", "album"), ("genre", "genre")):
+                    if meta.get(k_src): extra[k_dst] = meta[k_src]
+                if meta.get("year"): extra["year"] = int(meta["year"])
+                if meta.get("track"): extra["track_number"] = int(meta["track"])
+            t = db.add_track(path, convert=True, **extra)
             index[(norm(t.title), norm(t.artist))] = t
             if pl is not None:
                 db.add_track_to_playlist(pl, t); in_pl.add(t.track_id)

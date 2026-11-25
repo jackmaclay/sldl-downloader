@@ -1,7 +1,7 @@
 {
   "name": "sldl-downloader",
   "productName": "myPod",
-  "version": "3.8.1",
+  "version": "3.9.0",
   "description": "Download Spotify playlists via Soulseek and put them on a player",
   "main": "main.js",
   "scripts": {

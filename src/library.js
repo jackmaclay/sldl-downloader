@@ -1,8 +1,8 @@
 'use strict';
 // Where downloaded music lives (Jack, 2026-11-25).
-//   iPod folder = sldl's download folder (~/Music/New Downloads/<playlist>): always MP3 (or m4a), laid out for the iPods.
+//   iPod folder = sldl's download folder (~/Music/New Downloads/<playlist>): iPod-ready files only (MP3 or AAC), laid out for the iPods.
 //   Mac library = ~/Music/Playlists/<playlist>: the format Jack chose. When it is the same file as the iPod one it is an
-//                 APFS clone (no second copy on disk); when it is FLAC the iPod folder gets a converted MP3 instead.
+//                 APFS clone (no second copy on disk); when it is FLAC the iPod folder gets a 256 kbps AAC copy instead.
 //   "only" = a single folder and nowhere else (Lily's playlists).
 const fs = require('fs');
 const os = require('os');
@@ -21,15 +21,14 @@ function clone(src, dest) {
   fs.copyFileSync(src, dest); return 'copy';
 }
 
-// A GUI app does not inherit the shell PATH, so look in the usual Homebrew places too.
-function findFfmpeg() {
-  const cands = [process.env.FFMPEG_BIN, '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg', 'ffmpeg'].filter(Boolean);
-  for (const c of cands) { try { execFileSync(c, ['-version'], { stdio: 'ignore' }); return c; } catch { /* next */ } }
-  return null;
-}
-function ffmpegToMp3(bin) {
-  return (src, out) => execFileSync(bin, ['-v', 'error', '-y', '-i', src, '-map', '0:a:0', '-map', '0:v:0?', '-c:v', 'copy', '-disposition:v', 'attached_pic',
-    '-c:a', 'libmp3lame', '-b:a', '320k', '-ar', '44100', '-map_metadata', '0', '-id3v2_version', '3', out], { stdio: 'ignore' });
+// The iPod copy of a lossless file (FLAC, WAV, AIFF, OGG...): 256 kbps AAC at 44.1 kHz in an .m4a, made with macOS's own converter,
+// so nothing extra has to be installed. iPods play AAC natively and 44.1 kHz is within what they support. Returns null off macOS.
+const AFCONVERT = '/usr/bin/afconvert';
+function macConverter() {
+  if (process.platform !== 'darwin' || !fs.existsSync(AFCONVERT)) return null;
+  const run = (src, out) => execFileSync(AFCONVERT, ['-f', 'm4af', '-d', 'aac@44100', '-b', '256000', '-s', '0', '-q', '127', src, out], { stdio: 'ignore' });
+  run.ext = '.m4a'; // the file the iPod gets; a converter without .ext makes .mp3 (tests use that)
+  return run;
 }
 
 const safeName = (x) => String(x || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
@@ -55,9 +54,10 @@ function readIndex(folder) {
 const unique = (p) => { if (!fs.existsSync(p)) return p; const e = path.extname(p); const b = p.slice(0, -e.length); let i = 2; while (fs.existsSync(`${b} (${i})${e}`)) i++; return `${b} (${i})${e}`; };
 
 // Files one finished sldl run. staging = the folder sldl made. Returns { ipodFolder, libraryFolder, ipod:[files], cloned, copied, converted, notes }.
-//   saveToLibrary false: files go to the iPod folder only (non-MP3 files are converted and the original dropped).
+//   saveToLibrary false: files go to the iPod folder only (lossless files are converted and the original dropped).
 //   saveToLibrary true:  MP3/m4a go to the iPod folder and are cloned into the library; FLAC and other formats go to the library
-//                        and a converted MP3 goes to the iPod folder.
+//                        and a converted AAC copy goes to the iPod folder.
+//   meta: { 'file name': { title, artist, album, genre, year, track } } for the files we know. The iPod gets these names, not the file's own tags.
 function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert, meta = {} }) {
   const out = { ipodFolder: path.join(ipodDir, name), libraryFolder: libraryDir ? path.join(libraryDir, name) : null, ipod: [], cloned: 0, copied: 0, converted: 0, notes: [], tags: {} };
   fs.mkdirSync(out.ipodFolder, { recursive: true });
@@ -69,21 +69,23 @@ function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert,
     const m = meta[path.basename(f)];
     const ext = path.extname(f);
     const base = m && m.title ? `${safeName(m.title)}${m.artist ? ' - ' + safeName(m.artist) : ''}${ext}` : path.basename(f);
-    if (m && m.title) out.tags[path.basename(base, ext)] = { title: m.title, artist: m.artist || '' };
+    if (m && m.title) out.tags[path.basename(base, ext)] = { title: m.title, artist: m.artist || '', album: m.album || '', genre: m.genre || '', year: m.year || 0, track: m.track || 0 };
     if (IPOD_OK.test(f)) {
       const dest = path.join(out.ipodFolder, base);
       if (fs.existsSync(dest)) { fs.unlinkSync(f); out.ipod.push(dest); } else { fs.renameSync(f, dest); out.ipod.push(dest); }
       if (lib) { const t = path.join(out.libraryFolder, base); if (!fs.existsSync(t)) count(clone(dest, t)); }
       continue;
     }
-    // FLAC, ogg, wav...: the iPod needs an MP3
-    const mp3 = path.join(out.ipodFolder, path.basename(base, path.extname(base)) + '.mp3');
-    if (!convert) { out.notes.push(`${base}: ffmpeg not found, could not make an MP3 for the iPod`); if (lib) fs.renameSync(f, unique(path.join(out.libraryFolder, base))); continue; }
-    if (lib) {
-      const kept = unique(path.join(out.libraryFolder, base)); fs.renameSync(f, kept);       // the library keeps the lossless original
-      if (!fs.existsSync(mp3)) { convert(kept, mp3); out.converted++; }
-    } else { if (!fs.existsSync(mp3)) { convert(f, mp3); out.converted++; } fs.unlinkSync(f); }
-    out.ipod.push(mp3);
+    // FLAC, ogg, wav...: the iPod gets an AAC copy (the library keeps the original)
+    const stem = path.basename(base, path.extname(base)); const outExt = (convert && convert.ext) || '.mp3';
+    const copy = path.join(out.ipodFolder, stem + outExt);
+    if (!convert) { out.notes.push(`${base}: no converter available, so no iPod copy was made`); if (lib) fs.renameSync(f, unique(path.join(out.libraryFolder, base))); continue; }
+    const source = lib ? unique(path.join(out.libraryFolder, base)) : f;
+    if (lib) fs.renameSync(f, source);                         // the library keeps the lossless original
+    try { if (!fs.existsSync(copy)) { convert(source, copy); out.converted++; } }
+    catch (e) { out.notes.push(`${base}: could not make an iPod copy (${String(e.message).split('\n')[0]})`); if (fs.existsSync(copy)) fs.unlinkSync(copy); if (!lib) fs.unlinkSync(f); continue; }
+    if (!lib) fs.unlinkSync(f);
+    out.ipod.push(copy);
   }
   // The iPod writer reads this so a blank or odd tag in the file never becomes a blank or odd name on the screen.
   if (Object.keys(out.tags).length) {
@@ -102,4 +104,4 @@ function moveOnly(folder, only) {
   return dest;
 }
 
-module.exports = { readIndex, unique, clone, fileGroup, moveOnly, findFfmpeg, ffmpegToMp3, listAudio, expand, IPOD_OK };
+module.exports = { readIndex, unique, clone, fileGroup, moveOnly, macConverter, listAudio, expand, IPOD_OK };

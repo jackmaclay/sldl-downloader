@@ -22,5 +22,6 @@ contextBridge.exposeInMainWorld('api', {
   send: call('send:run'),
   reveal: call('file:reveal'),
   openExternal: call('app:open-external'),
+  openSupport: call('app:support'),
   onEvent: (cb) => ipcRenderer.on('dl:event', (_e, data) => cb(data)),
 });

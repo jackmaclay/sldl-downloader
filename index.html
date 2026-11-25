@@ -13,6 +13,7 @@
   <nav class="menu">
     <button class="nav on" data-page="download"><svg viewBox="0 0 16 16"><path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13h10"/></svg><span>Download</span></button>
     <button class="nav" data-page="player"><svg viewBox="0 0 16 16"><rect x="4" y="1.5" width="8" height="13" rx="2"/><circle cx="8" cy="9.5" r="2"/><path d="M6 4.5h4"/></svg><span>Player</span></button>
+    <button class="nav" data-page="help"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.3a1.8 1.8 0 1 1 2.5 1.7c-.5.3-.8.6-.8 1.2M8 11.4v.1"/></svg><span>Help</span></button>
     <button class="nav" data-page="settings"><svg viewBox="0 0 16 16"><path d="M2.5 5h11M2.5 11h11"/><circle cx="6" cy="5" r="1.7"/><circle cx="10.5" cy="11" r="1.7"/></svg><span>Settings</span></button>
   </nav>
   <div class="grow"></div>
@@ -25,14 +26,19 @@
   <div class="scroll">
 
     <section class="page on" id="page-download">
+      <div class="g firstrun" id="firstrun" hidden>
+        <div class="fr1"><b>Welcome to myPod</b><p>Two quick things before your first download: get a free Soulseek account, then type it into Settings. The guide explains everything in a few minutes.</p>
+          <div class="row"><button class="btn primary" id="go-help">Read the guide</button><button class="btn" id="go-settings">Open Settings</button></div></div>
+      </div>
       <div class="g">
-        <div class="fr"><label for="url">Spotify URL</label><input id="url" placeholder="Playlist or profile link: open.spotify.com/..." spellcheck="false"></div>
+        <div class="fr"><label for="url">Spotify URL</label><input id="url" placeholder="Paste a Spotify playlist or profile link" spellcheck="false"></div>
         <div class="fr"><label for="name">Playlist name</label><input id="name" placeholder="Optional, uses the Spotify name"></div>
         <div class="fr"><label for="format">Format for all</label>
           <select id="format"><option value="mp3">MP3</option><option value="flac">FLAC (kept in your Music folder)</option></select></div>
         <div class="fr"><label for="for-ipod">For iPod</label><select id="for-ipod"><option value="">None, Mac only</option></select></div>
-        <div class="fr"><label for="save-lib">Also save to my Music folder</label><input id="save-lib" type="checkbox"></div>
+        <div class="fr"><label for="save-lib">Also keep a best-quality copy</label><input id="save-lib" type="checkbox"></div>
       </div>
+      <div class="note pad-note" id="where"></div>
       <div class="bar">
         <button class="btn primary" id="start">Start download</button>
         <button class="btn" id="cancel" hidden>Cancel</button>
@@ -79,22 +85,27 @@
     </section>
 
     <section class="page" id="page-settings">
-      <div class="cap">Soulseek</div>
+      <div class="cap">Soulseek account</div>
       <div class="g">
         <div class="fr"><label for="s-user">Username</label><input id="s-user" spellcheck="false" autocomplete="off"></div>
         <div class="fr"><label for="s-pass">Password</label><input id="s-pass" type="password" autocomplete="off"></div>
       </div>
-      <div class="note pad-note">No account yet? Get the Soulseek client and sign up at <button class="link inline" id="slsk-link">slsknet.org</button></div>
-      <div class="cap">Downloads</div>
+      <div class="note pad-note">myPod finds music on Soulseek, so you need a free account. No account yet? Get the Soulseek app and sign up at <button class="link inline" id="slsk-link">slsknet.org</button>, then type the username and password you made here.</div>
+
+      <div class="cap">Where your music is saved</div>
       <div class="g">
-        <div class="fr"><label>Folder</label><button class="link" id="s-path-btn">Choose...</button></div>
-        <div class="fr"><label>Current</label><span class="val" id="s-path">Not set</span></div>
-        <div class="fr"><label for="s-format">Preferred format</label>
-          <select id="s-format"><option>mp3</option><option>m4a</option></select></div>
-        <div class="fr"><label for="s-flac">Allow FLAC</label><input id="s-flac" type="checkbox"></div>
-        <div class="fr"><label for="s-eject">Eject iPod after sending</label><input id="s-eject" type="checkbox"></div>
-        <div class="fr"><label for="s-namefmt">File names</label><input id="s-namefmt" placeholder="{artist} - {title}" spellcheck="false"></div>
+        <div class="fr tall"><label>iPod folder<small>MP3 only. Songs for your iPod go here.</small></label>
+          <div class="pathcell"><span class="val" id="s-ipod-path"></span><button class="link" id="s-ipod-btn">Choose...</button></div></div>
+        <div class="fr tall"><label>Music folder<small>Best quality. Your own collection, MP3 or FLAC.</small></label>
+          <div class="pathcell"><span class="val" id="s-lib-path"></span><button class="link" id="s-lib-btn">Choose...</button></div></div>
       </div>
+      <div class="note pad-note">Pick two different folders. A song saved in both uses the disk space once, so keeping both costs almost nothing.</div>
+
+      <div class="cap">iPod</div>
+      <div class="g">
+        <div class="fr"><label for="s-eject">Eject iPod after sending</label><input id="s-eject" type="checkbox"></div>
+      </div>
+
       <div class="cap">Appearance</div>
       <div class="g">
         <div class="fr"><label>App icon</label>
@@ -103,7 +114,53 @@
             <button class="iconbtn" data-icon="alt" title="Fairy"><img class="smooth" src="assets/icon-alt.png" alt="Alternative icon"></button>
           </div></div>
       </div>
+
+      <div class="g solo"><div class="fr solo"><button class="btn primary" id="support">Support this app</button></div></div>
+
+      <details class="adv"><summary>Advanced</summary>
+        <div class="g">
+          <div class="fr"><label for="s-format">Format for searches</label><select id="s-format"><option>mp3</option><option>m4a</option></select></div>
+          <div class="fr"><label for="s-flac">Allow FLAC in searches</label><input id="s-flac" type="checkbox"></div>
+          <div class="fr"><label for="s-namefmt">File names</label><input id="s-namefmt" placeholder="{artist} - {title}" spellcheck="false"></div>
+        </div>
+      </details>
       <div class="bar"><button class="btn primary" id="s-save">Save</button><span class="note" id="s-note"></span></div>
+    </section>
+
+    <section class="page help" id="page-help">
+      <div class="cap">How myPod works</div>
+      <div class="g steps">
+        <div class="step"><span class="n">1</span><div><b>Get a free Soulseek account</b>
+          <p>myPod finds your music on the Soulseek network. Download the Soulseek app, sign up (it is free), then type the username and password into Settings. You only do this once.</p>
+          <button class="btn" id="help-slsk">Open slsknet.org</button></div></div>
+        <div class="step"><span class="n">2</span><div><b>Check your two folders</b>
+          <p>In Settings, under "Where your music is saved", you will see an iPod folder and a Music folder (explained below). The defaults are fine. Change them only if you want your music somewhere else.</p></div></div>
+        <div class="step"><span class="n">3</span><div><b>Paste a Spotify link</b>
+          <p>On the Download page, paste one of these:</p>
+          <ul><li><b>A playlist link</b>, like <code>open.spotify.com/playlist/...</code></li>
+          <li><b>A profile link</b>, like <code>open.spotify.com/user/...</code>. myPod lists that person's public playlists so you can choose which ones.</li></ul>
+          <p>In Spotify press Share, then Copy link. The playlist has to be public. For a very long playlist, Spotify only shares the first 100 songs.</p></div></div>
+        <div class="step"><span class="n">4</span><div><b>Choose what you want</b>
+          <p>Pick MP3 (plays on any iPod) or FLAC (CD quality, big files, for your own collection). You can set it for every playlist, for each playlist, or even for each song. Tick the playlists you want, pick which iPod they are for, and press Download.</p></div></div>
+        <div class="step"><span class="n">5</span><div><b>Put it on your iPod</b>
+          <p>Plug the iPod in. When the download finishes, a "Put it on your player" box appears. Pick the iPod and press Send. myPod connects the iPod only for the upload, copies the songs, and ejects it, so when it says "Ejected" it is safe to unplug.</p></div></div>
+      </div>
+
+      <div class="cap">Your two folders</div>
+      <div class="g folders-help">
+        <div class="fh"><b>iPod folder: MP3 only</b><p>Everything here is an MP3, because that is what an iPod plays. This is what gets copied onto your iPod.</p></div>
+        <div class="fh"><b>Music folder: best quality</b><p>Your own collection, in the quality you chose, MP3 or FLAC. Turn off "Also keep a best-quality copy" on the Download page if you only want the iPod folder.</p></div>
+        <div class="fh"><b>Same song in both?</b><p>If a song is an MP3 in both, it is stored once, not twice. A FLAC song keeps the FLAC in the Music folder and a normal MP3 copy in the iPod folder.</p></div>
+      </div>
+
+      <div class="cap">Good to know</div>
+      <div class="g qa">
+        <div class="step"><div><b>A song says "not found"</b><p>Not every song is shared on Soulseek. myPod accepts a different version of a song (live, remaster) if the original is not there. Songs it cannot find are listed when it finishes.</p></div></div>
+        <div class="step"><div><b>"Already have it" / "already on" the iPod</b><p>myPod checks your folders, and the iPod you choose, before downloading, so it never downloads or stores the same song twice. Press Scan songs on the Player page so it knows what is on each iPod.</p></div></div>
+        <div class="step"><div><b>Which iPods work?</b><p>Tested on the iPod classic and the iPod nano (4th generation). iPods that show up as a drive on your Mac when plugged in should work. The iPod touch and iPhone do not.</p></div></div>
+        <div class="step"><div><b>FLAC needs a helper</b><p>Making an MP3 copy of a FLAC song uses a free tool called ffmpeg. If it is missing, myPod tells you.</p></div></div>
+        <div class="step"><div><b>Is myPod free?</b><p>Yes. If it saves you time there is a Support this app button in Settings.</p></div></div>
+      </div>
     </section>
 
   </div>

@@ -12,6 +12,7 @@ const prefs = require('./src/prefs');
 const plan = require('./src/plan');
 const dedupe = require('./src/dedupe');
 const known = require('./src/known');
+const folders = require('./src/folders');
 const os = require('os');
 
 let win;
@@ -47,7 +48,7 @@ app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWind
 
 const push = (data) => { if (win && !win.isDestroyed()) win.webContents.send('dl:event', data); };
 
-const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat, autoEject: p.autoEject, icon: p.icon }; };
+const appPrefs = () => { const p = prefs.read(); return { allowFlac: p.allowFlac, saveToLibrary: p.saveToLibrary, defaultFormat: p.defaultFormat, autoEject: p.autoEject, icon: p.icon, ipodDir: folders.ipodDir(), libraryDir: folders.libraryDir(), home: os.homedir() }; };
 ipcMain.handle('settings:get', () => ({ ...conf.redact(conf.read()), ...appPrefs() }));
 ipcMain.handle('settings:save', (_e, values) => {
   const clean = {};
@@ -58,6 +59,7 @@ ipcMain.handle('settings:save', (_e, values) => {
   for (const k of ['allowFlac', 'saveToLibrary', 'autoEject']) if (typeof values[k] === 'boolean') pv[k] = values[k];
   if (['mp3', 'flac'].includes(values.defaultFormat)) pv.defaultFormat = values.defaultFormat;
   if (['original', 'alt'].includes(values.icon)) pv.icon = values.icon;
+  if (typeof values.libraryDir === 'string' && values.libraryDir.trim()) pv.libraryDir = values.libraryDir.trim();
   if (Object.keys(pv).length) prefs.write(pv);
   if (pv.icon) applyIcon();
   return { ...conf.redact(conf.read()), ...appPrefs() };
@@ -93,7 +95,7 @@ ipcMain.handle('playlist:plan', async (_e, { input }) => {
   return { playlists: [await spotify.playlistPlan(id)], ...(await budgetInfo()) };
 });
 // The folders searched for "do we already have this song": the iPod folder, the Mac library and Lily's folder.
-const indexDirs = () => [conf.read().path, prefs.read().libraryDir, path.join(os.homedir(), 'Music', 'Lily')];
+const indexDirs = () => [folders.ipodDir(), folders.libraryDir(), path.join(os.homedir(), 'Music', 'Lily')];
 let batchIndex = null; let batchSerial = null;
 const buildBatchIndex = async (serial) => { batchSerial = serial || null; batchIndex = await dedupe.buildIndex(indexDirs(), { catalog: serial ? known.loadCatalog(serial) : null }); return batchIndex; };
 // For the planner: for each song, whether it is already on this Mac, already on the chosen iPod (from its stored song list), or repeats an
@@ -132,6 +134,8 @@ ipcMain.handle('ipod:eject', async (_e, { serial }) => {
 });
 ipcMain.handle('ipod:setup', () => ipod.setup());
 ipcMain.handle('devices:music', () => devices.musicSources());
+const { SUPPORT_URL } = require('./src/support');
+ipcMain.handle('app:support', () => shell.openExternal(SUPPORT_URL)); // the renderer never supplies the URL
 const EXTERNAL = new Set(['https://www.slsknet.org/']);
 ipcMain.handle('app:open-external', (_e, url) => { if (EXTERNAL.has(url)) return shell.openExternal(url); });
 ipcMain.handle('file:reveal', (_e, p) => { if (typeof p === 'string') shell.showItemInFolder(p); });

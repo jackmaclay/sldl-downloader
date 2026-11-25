@@ -24,7 +24,7 @@ const BLOCKS = 40;
 const blocksEl = $('blocks');
 for (let i = 0; i < BLOCKS; i++) blocksEl.appendChild(document.createElement('i'));
 
-const TITLES = { download: 'Download', player: 'Player', settings: 'Settings' };
+const TITLES = { download: 'Download', player: 'Player', help: 'Help', settings: 'Settings' };
 function show(page) {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === `page-${page}`));
   document.querySelectorAll('.nav').forEach((n) => n.classList.toggle('on', n.dataset.page === page));
@@ -223,7 +223,7 @@ $('start').addEventListener('click', async () => {
 });
 $('pick-go').addEventListener('click', () => { const list = plan.playlists.filter((p) => p.on); if (list.length) runMany(list); });
 $('cancel').addEventListener('click', () => { cancelled = true; window.api.cancelDownload(); });
-window.api.getSettings().then((c) => { $('save-lib').checked = !!c.saveToLibrary; $('format').value = c.defaultFormat || 'mp3'; }).catch(() => {});
+window.api.getSettings().then((c) => { $('save-lib').checked = !!c.saveToLibrary; $('format').value = c.defaultFormat || 'mp3'; showWhere(); }).catch(() => {});
 
 /* ---------- send ---------- */
 async function syncRouteUi() {
@@ -349,23 +349,52 @@ function applyFlac(allowed) {
 }
 window.api.getSettings().then((c) => applyFlac(c.allowFlac)).catch(() => {});
 $('s-flac').addEventListener('change', () => applyFlac($('s-flac').checked));
-async function loadSettings() {
+// The two folders: iPod folder (MP3 only) and Music folder (best quality).
+const S = { home: '', ipod: '', lib: '' };
+const tilde = (p) => (S.home && p.startsWith(S.home) ? '~' + p.slice(S.home.length) : p);
+function showFolders() {
+  for (const [id, key] of [['s-ipod-path', 'ipod'], ['s-lib-path', 'lib']]) { $(id).textContent = tilde(S[key]); $(id).title = S[key]; }
+}
+// "Where files go" under the Download options, and the first-run card.
+const lastName = (p) => String(p).split('/').filter(Boolean).pop() || p;
+function showWhere() {
+  const w = $('where'); w.replaceChildren();
+  const b = (t) => { const e = document.createElement('b'); e.textContent = t; return e; };
+  w.append('MP3s for your iPod are saved in ', b(lastName(S.ipod)));
+  if ($('save-lib').checked) w.append(', and a best-quality copy in ', b(lastName(S.lib)));
+  w.append('. You can change these in Settings.');
+}
+async function refreshFolders() {
   const c = await window.api.getSettings();
+  S.home = c.home; S.ipod = c.ipodDir; S.lib = c.libraryDir;
+  showFolders(); showWhere();
+  $('firstrun').hidden = !!(c.user && c.pass); // no Soulseek login yet: show the welcome card
+  return c;
+}
+async function loadSettings() {
+  const c = await refreshFolders();
   $('s-user').value = c.user || ''; $('s-pass').value = c.pass || '';
   applyFlac(c.allowFlac); $('s-flac').checked = !!c.allowFlac; $('s-eject').checked = c.autoEject !== false;
-  $('s-path').textContent = c.path || 'Not set'; $('s-format').value = c['pref-format'] || 'mp3';
-  if (!$('s-format').value) $('s-format').value = 'mp3';
+  $('s-format').value = c['pref-format'] || 'mp3'; if (!$('s-format').value) $('s-format').value = 'mp3';
   $('s-namefmt').value = c['name-format'] || ''; $('s-note').textContent = '';
 }
-$('s-path-btn').addEventListener('click', async () => { const p = await window.api.pickFolder(); if (p) $('s-path').textContent = p; });
+$('s-ipod-btn').addEventListener('click', async () => { const p = await window.api.pickFolder(); if (p) { S.ipod = p; showFolders(); } });
+$('s-lib-btn').addEventListener('click', async () => { const p = await window.api.pickFolder(); if (p) { S.lib = p; showFolders(); } });
 $('s-save').addEventListener('click', async () => {
-  const path = $('s-path').textContent;
+  if (S.ipod === S.lib) { $('s-note').className = 'note err'; $('s-note').textContent = 'Pick two different folders for the iPod folder and the Music folder.'; return; }
   await window.api.saveSettings({
-    user: $('s-user').value, pass: $('s-pass').value, path: path === 'Not set' ? '' : path,
+    user: $('s-user').value, pass: $('s-pass').value, path: S.ipod, libraryDir: S.lib,
     'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value, allowFlac: $('s-flac').checked, autoEject: $('s-eject').checked,
   });
   $('s-note').className = 'note ok'; $('s-note').textContent = 'Saved.';
+  refreshFolders().catch(() => {});
 });
+$('support').addEventListener('click', () => window.api.openSupport());
+$('help-slsk').addEventListener('click', () => window.api.openExternal('https://www.slsknet.org/'));
+$('go-help').addEventListener('click', () => show('help'));
+$('go-settings').addEventListener('click', () => show('settings'));
+$('save-lib').addEventListener('change', showWhere);
+refreshFolders().catch(() => {});
 // App icon: the sidebar logo changes here, the Dock icon in main.js (saved when picked, no Save needed).
 function applyIconUi(kind) {
   const alt = kind === 'alt'; const img = document.querySelector('.brand img');

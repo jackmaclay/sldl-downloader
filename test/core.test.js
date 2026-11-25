@@ -308,3 +308,17 @@ test('prefs: the icon choice is saved and only original or alt are accepted', ()
   assert.strictEqual(prefs.write({ icon: 'rainbow' }).icon, 'original');           // anything else falls back
   delete process.env.SLDL_HOME;
 });
+
+test('folders: iPod folder from sldl.conf or a friendly default, Music folder from prefs or its default', () => {
+  const old = { conf: process.env.SLDL_CONF, home: process.env.SLDL_HOME };
+  const d = tmp(); process.env.SLDL_HOME = d; process.env.SLDL_CONF = path.join(d, 'sldl.conf');
+  delete require.cache[require.resolve('../src/folders')];
+  const folders = require('../src/folders'); const prefs = require('../src/prefs');
+  assert.strictEqual(folders.ipodDir(), folders.DEFAULT_IPOD);                          // nothing set: the default
+  assert.match(folders.DEFAULT_IPOD, /myPod[\\/]For iPod \(MP3\)$/);
+  assert.strictEqual(folders.libraryDir(), prefs.DEFAULT_LIBRARY); assert.match(prefs.DEFAULT_LIBRARY, /myPod[\\/]Music \(best quality\)$/);
+  fs.writeFileSync(process.env.SLDL_CONF, 'path = /somewhere/ipod\n'); prefs.write({ libraryDir: '/somewhere/music' });
+  assert.strictEqual(folders.ipodDir(), '/somewhere/ipod'); assert.strictEqual(folders.libraryDir(), '/somewhere/music');   // chosen folders win
+  if (old.conf === undefined) delete process.env.SLDL_CONF; else process.env.SLDL_CONF = old.conf;
+  if (old.home === undefined) delete process.env.SLDL_HOME; else process.env.SLDL_HOME = old.home;
+});

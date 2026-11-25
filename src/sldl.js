@@ -79,7 +79,7 @@ async function prepareInput(input, c, log) {
 function download({ input, outDir, format, name, bin = findBinary(), csvFallback = true, rawFormat = false }) {
   const ev = new EventEmitter();
   const c = conf.read();
-  const dir = outDir || c.path;
+  const dir = outDir || require('./folders').ipodDir();
   ev.done = new Promise((resolve, reject) => {
     if (!input) return reject(new Error('Nothing to download: give a Spotify URL or a search.'));
     if (!dir) return reject(new Error('No download folder set. Choose one in Settings or pass --out.'));

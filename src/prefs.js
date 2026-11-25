@@ -11,7 +11,8 @@ const os = require('os');
 const path = require('path');
 
 const file = () => path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config', 'sldl'), 'app.json');
-const DEFAULTS = { allowFlac: false, saveToLibrary: true, libraryDir: path.join(os.homedir(), 'Music', 'Playlists'), defaultFormat: 'mp3', autoEject: true, icon: 'original' };
+const DEFAULT_LIBRARY = path.join(os.homedir(), 'Music', 'myPod', 'Music (best quality)');
+const DEFAULTS = { allowFlac: false, saveToLibrary: true, libraryDir: DEFAULT_LIBRARY, defaultFormat: 'mp3', autoEject: true, icon: 'original' };
 
 function read() {
   try { return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(file(), 'utf8')) }; } catch { return { ...DEFAULTS }; }
@@ -32,4 +33,4 @@ function resolveFormat(requested, confFormat, prefs = read()) {
   return f === 'flac' && !prefs.allowFlac ? 'mp3' : f;
 }
 
-module.exports = { read, write, resolveFormat, file, DEFAULTS };
+module.exports = { read, write, resolveFormat, file, DEFAULTS, DEFAULT_LIBRARY };

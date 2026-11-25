@@ -140,3 +140,33 @@ body.resizing { user-select:none; }
 .iconbtn:hover { background:var(--hover); }
 .iconbtn.on { border-color:var(--accent); }
 img.smooth, .brand img.smooth { image-rendering:auto; }
+
+/* settings: two folders, support, advanced */
+.fr.tall { min-height:54px; }
+.fr.tall label small { display:block; color:var(--mute); font-size:12px; margin-top:2px; font-weight:400; }
+.pathcell { display:flex; align-items:center; justify-content:flex-end; gap:10px; min-width:0; }
+.pathcell .val { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:220px; }
+.g.solo, .g.solo .fr.solo { background:transparent; }
+.fr.solo { grid-template-columns:1fr; justify-items:center; border-top:0; padding:2px 0; }
+.adv { margin:18px 0 6px; }
+.adv summary { cursor:pointer; color:var(--mute); padding:4px 4px 8px; }
+.adv .g { margin-top:4px; }
+
+/* first run card and where-files-go note (Download page) */
+.firstrun { padding:14px 16px; margin-bottom:14px; border:1px solid var(--accent); background:var(--group); }
+.firstrun p { margin:6px 0 10px; color:var(--mute); line-height:1.4; }
+.firstrun .row { display:flex; gap:8px; }
+
+/* help page */
+.help .step { display:flex; gap:12px; padding:12px 14px; border-top:.5px solid var(--sep); }
+.help .step:first-child { border-top:0; }
+.help .n { flex:none; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#1b1b1b; font-weight:700; display:grid; place-items:center; font-size:13px; margin-top:1px; }
+.help .step b { display:block; margin-bottom:2px; }
+.help .step p, .help .fh p { margin:4px 0 8px; color:var(--mute); line-height:1.45; }
+.help ul { margin:4px 0 8px 18px; padding:0; color:var(--mute); line-height:1.45; }
+.help code { background:var(--hover); padding:1px 5px; border-radius:5px; font-size:12px; }
+.help .fh { padding:12px 14px; border-top:.5px solid var(--sep); }
+.help .fh:first-child { border-top:0; }
+.help .fh p { margin-bottom:2px; }
+.help li b { display:inline; margin:0; }
+.g.solo { margin-top:14px; }

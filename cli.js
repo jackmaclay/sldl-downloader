@@ -12,6 +12,7 @@ const prefs = require('./src/prefs');
 const plan = require('./src/plan');
 const dedupe = require('./src/dedupe');
 const known = require('./src/known');
+const folders = require('./src/folders');
 const os = require('os');
 
 const HELP = `sldl-dl: download Spotify playlists from Soulseek and put them on a player
@@ -119,7 +120,7 @@ async function runPlanned(out, flags, pls) {
   if (flags.ipod || flags.device) { try { dev = ipod.resolveDevice(await devices.list(), flags.device); catalog = known.loadCatalog(dev.serial); } catch { /* chosen at upload time */ } }
   if (dev && !catalog) out.info(`No song list for ${dev.model} yet. Run \`sldl-dl scan ${dev.model.replace(/^iPod /, '').split(' ')[0].toLowerCase()}\` so downloads can skip songs it already has.`);
   if (catalog) out.info(`Using ${dev.model}'s song list (${catalog.tracks.length} songs): songs it has are linked, not downloaded.`);
-  const index = await dedupe.buildIndex([conf.read().path, p.libraryDir, path.join(os.homedir(), 'Music', 'Lily')], { catalog });
+  const index = await dedupe.buildIndex([folders.ipodDir(), folders.libraryDir(), path.join(os.homedir(), 'Music', 'Lily')], { catalog });
   for (const pl of pls) {
     out.info(`--- ${pl.name}`);
     const ev = plan.runPlaylist({ name: flags.name && pls.length === 1 ? flags.name : pl.name, items: pl.items.map((i) => ({ ...i, format: fmt })), saveToLibrary: save, only, index });
@@ -256,7 +257,8 @@ async function main() {
       ['sldl binary', bin],
       ['Soulseek user', c.user ? 'set' : 'missing (config set user NAME)'],
       ['Soulseek password', c.pass ? 'set' : 'missing (config set pass ...)'],
-      ['Download folder', c.path || 'missing (config set path DIR)'],
+      ['iPod folder (MP3)', folders.ipodDir()],
+      ['Music folder', folders.libraryDir()],
     ];
     for (const [k, v] of checks) console.log(`${k.padEnd(20)} ${v}`);
     const list = await devices.list();

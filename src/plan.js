@@ -24,7 +24,7 @@ function runPlaylist(opts) {
   ev.cancel = () => { cancelled = true; if (current && current.cancel) current.cancel(); };
   ev.done = (async () => {
     const c = conf.read(); const p = prefs.read();
-    const ipodDir = library.expand(opts.ipodDir || c.path);
+    const ipodDir = library.expand(opts.ipodDir || require('./folders').ipodDir());
     if (!ipodDir) throw new Error('No download folder set. Choose one in Settings.');
     const libraryDir = library.expand(opts.libraryDir !== undefined ? opts.libraryDir : p.libraryDir);
     const saveToLibrary = !opts.only && !!(opts.saveToLibrary !== undefined ? opts.saveToLibrary : p.saveToLibrary) && !!libraryDir; // an "only" playlist lives in one folder

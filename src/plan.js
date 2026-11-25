@@ -63,7 +63,7 @@ function runPlaylist(opts) {
           for (const t of ['line', 'total', 'searching', 'progress', 'done', 'failed']) current.on(t, (e, counts) => ev.emit(t, t === 'line' ? e : { ...e, group: fmt }, counts));
           const r = await current.done;
           totals.total += r.total; totals.done += r.done; totals.failed += r.failed;
-          if (r.folder) absorb(library.fileGroup({ staging: r.folder, name, ipodDir, libraryDir, saveToLibrary, convert }));
+          if (r.folder) absorb(library.fileGroup({ staging: r.folder, name, ipodDir, libraryDir, saveToLibrary, convert, meta: library.readIndex(r.folder) }));
         }
       } finally { fs.rmSync(staging, { recursive: true, force: true }); }
     }

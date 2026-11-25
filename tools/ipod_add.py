@@ -53,11 +53,19 @@ def main():
         except Exception:
             return "", ""
 
+    # <folder>/.tags.json (written by the app) holds the proper title and artist for each file, from Spotify.
+    side = {}
+    try:
+        import json as _j
+        side = _j.load(open(os.path.join(os.path.dirname(files[0]), ".tags.json"))) if files else {}
+    except Exception:
+        side = {}
     added = skipped = 0
     for i, path in enumerate(files, 1):
         name = os.path.basename(path)
         try:
-            title, artist = tags(path)
+            meta = side.get(os.path.splitext(os.path.basename(path))[0], {})
+            title, artist = (meta.get("title"), meta.get("artist")) if meta.get("title") else tags(path)
             t = index.get((norm(title), norm(artist))) if title else None
             if t is not None:  # already on the iPod: reuse it, and make sure it is in this playlist
                 if pl is not None and t.track_id not in in_pl:
@@ -65,7 +73,7 @@ def main():
                 skipped += 1
                 emit(type="track", n=i, of=len(files), file=name, status="already there")
                 continue
-            t = db.add_track(path, convert=True)
+            t = db.add_track(path, convert=True, **({"title": meta["title"], "artist": meta.get("artist", "")} if meta.get("title") else {}))
             index[(norm(t.title), norm(t.artist))] = t
             if pl is not None:
                 db.add_track_to_playlist(pl, t); in_pl.add(t.track_id)

@@ -205,3 +205,21 @@ test('runPlaylist: songs already on the Mac are reused, not downloaded again; fo
   // FLAC without a library to keep it in is refused
   await assert.rejects(plan.runPlaylist({ name: 'N', items: [items[2]], saveToLibrary: false, libraryDir: lib, ipodDir: ipod, download, convert }).done, /FLAC is kept in your Music folder/);
 });
+
+test('files are named from Spotify data, and the iPod gets proper title and artist even when the file has none', () => {
+  const library = require('../src/library');
+  const stage = tmp(); const ipod = tmp(); const lib = tmp();
+  fs.writeFileSync(path.join(stage, '_index.csv'),
+    'filepath,artist,album,title,length,tracktype,state,failurereason\n' +
+    './04 - junk name.mp3,"Maribou State, Holly Walker",,"Spooky - Recorded at RAK Studios, London",222,0,1,0\n' +
+    ',Nobody,,Not Found Song,100,0,2,3\n');
+  const meta = library.readIndex(stage);
+  assert.deepStrictEqual(Object.keys(meta), ['04 - junk name.mp3']);
+  assert.strictEqual(meta['04 - junk name.mp3'].title, 'Spooky - Recorded at RAK Studios, London');
+  fs.writeFileSync(path.join(stage, '04 - junk name.mp3'), 'audio');
+  library.fileGroup({ staging: stage, name: 'P', ipodDir: ipod, libraryDir: lib, saveToLibrary: true, meta });
+  const want = 'Spooky - Recorded at RAK Studios, London - Maribou State, Holly Walker.mp3';
+  assert.ok(fs.existsSync(path.join(ipod, 'P', want)) && fs.existsSync(path.join(lib, 'P', want)));
+  const side = JSON.parse(fs.readFileSync(path.join(ipod, 'P', '.tags.json'), 'utf8'));
+  assert.deepStrictEqual(side[path.basename(want, '.mp3')], { title: 'Spooky - Recorded at RAK Studios, London', artist: 'Maribou State, Holly Walker' });
+});

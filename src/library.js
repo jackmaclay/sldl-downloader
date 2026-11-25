@@ -32,20 +32,44 @@ function ffmpegToMp3(bin) {
     '-c:a', 'libmp3lame', '-b:a', '320k', '-ar', '44100', '-map_metadata', '0', '-id3v2_version', '3', out], { stdio: 'ignore' });
 }
 
+const safeName = (x) => String(x || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+
+// sldl writes <folder>/_index.csv: which requested song each downloaded file is. Returns { 'file name': { title, artist } } for the files it got.
+function readIndex(folder) {
+  let txt = ''; try { txt = fs.readFileSync(path.join(folder, '_index.csv'), 'utf8'); } catch { return {}; }
+  const rows = []; let row = []; let cell = ''; let q = false;
+  for (let i = 0; i < txt.length; i++) {
+    const c = txt[i];
+    if (q) { if (c === '"' && txt[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true; else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && txt[i + 1] === '\n') i++; row.push(cell); cell = ''; if (row.length > 1 || row[0]) rows.push(row); row = []; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const head = rows.shift() || []; const col = (n) => head.indexOf(n);
+  const out = {};
+  for (const r of rows) if (r[col('state')] === '1' && r[col('filepath')]) out[path.basename(r[col('filepath')])] = { title: r[col('title')], artist: r[col('artist')] };
+  return out;
+}
+
 const unique = (p) => { if (!fs.existsSync(p)) return p; const e = path.extname(p); const b = p.slice(0, -e.length); let i = 2; while (fs.existsSync(`${b} (${i})${e}`)) i++; return `${b} (${i})${e}`; };
 
 // Files one finished sldl run. staging = the folder sldl made. Returns { ipodFolder, libraryFolder, ipod:[files], cloned, copied, converted, notes }.
 //   saveToLibrary false: files go to the iPod folder only (non-MP3 files are converted and the original dropped).
 //   saveToLibrary true:  MP3/m4a go to the iPod folder and are cloned into the library; FLAC and other formats go to the library
 //                        and a converted MP3 goes to the iPod folder.
-function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert }) {
-  const out = { ipodFolder: path.join(ipodDir, name), libraryFolder: libraryDir ? path.join(libraryDir, name) : null, ipod: [], cloned: 0, copied: 0, converted: 0, notes: [] };
+function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert, meta = {} }) {
+  const out = { ipodFolder: path.join(ipodDir, name), libraryFolder: libraryDir ? path.join(libraryDir, name) : null, ipod: [], cloned: 0, copied: 0, converted: 0, notes: [], tags: {} };
   fs.mkdirSync(out.ipodFolder, { recursive: true });
   const lib = saveToLibrary && out.libraryFolder;
   if (lib) fs.mkdirSync(out.libraryFolder, { recursive: true });
   const count = (how) => (how === 'clone' ? out.cloned++ : out.copied++);
   for (const f of listAudio(staging)) {
-    const base = path.basename(f);
+    // Name the file "Title - Artist" from the Spotify data when we know which song it is, whatever the uploader called it.
+    const m = meta[path.basename(f)];
+    const ext = path.extname(f);
+    const base = m && m.title ? `${safeName(m.title)}${m.artist ? ' - ' + safeName(m.artist) : ''}${ext}` : path.basename(f);
+    if (m && m.title) out.tags[path.basename(base, ext)] = { title: m.title, artist: m.artist || '' };
     if (IPOD_OK.test(f)) {
       const dest = path.join(out.ipodFolder, base);
       if (fs.existsSync(dest)) { fs.unlinkSync(f); out.ipod.push(dest); } else { fs.renameSync(f, dest); out.ipod.push(dest); }
@@ -61,6 +85,11 @@ function fileGroup({ staging, name, ipodDir, libraryDir, saveToLibrary, convert 
     } else { if (!fs.existsSync(mp3)) { convert(f, mp3); out.converted++; } fs.unlinkSync(f); }
     out.ipod.push(mp3);
   }
+  // The iPod writer reads this so a blank or odd tag in the file never becomes a blank or odd name on the screen.
+  if (Object.keys(out.tags).length) {
+    const side = path.join(out.ipodFolder, '.tags.json'); let cur = {}; try { cur = JSON.parse(fs.readFileSync(side, 'utf8')); } catch { /* new */ }
+    fs.writeFileSync(side, JSON.stringify({ ...cur, ...out.tags }, null, 1));
+  }
   return out;
 }
 
@@ -73,4 +102,4 @@ function moveOnly(folder, only) {
   return dest;
 }
 
-module.exports = { unique, clone, fileGroup, moveOnly, findFfmpeg, ffmpegToMp3, listAudio, expand, IPOD_OK };
+module.exports = { readIndex, unique, clone, fileGroup, moveOnly, findFfmpeg, ffmpegToMp3, listAudio, expand, IPOD_OK };

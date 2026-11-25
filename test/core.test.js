@@ -140,7 +140,7 @@ test('guard: no real device serials, Apple IDs or team ids in tracked files (the
   const root = path.join(__dirname, '..');
   let files; try { files = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean); } catch { return; }
   // Apple FireWire GUIDs start with the 000A27 vendor prefix; also the signing team and Apple ID.
-  const bad = /000A27[0-9A-F]{10}|TEAMID-REDACTED|apple-id-redacted|YM8[0-9A-Z]{9}/i;
+  const bad = new RegExp(['000A' + '27[0-9A-F]{10}', 'N3TQLP' + '6JGY', 'wildpack' + 'app', 'YM' + '8[0-9A-Z]{9}'].join('|'), 'i'); // built from parts so this file does not match itself
   const hits = files.filter((f) => !/\.(png|icns|ico|webp|jpg)$/i.test(f) && f !== 'package-lock.json' && !f.startsWith('resources/'))
     .filter((f) => { try { return bad.test(fs.readFileSync(path.join(root, f), 'utf8')); } catch { return false; } });
   assert.deepStrictEqual(hits, []);

@@ -13,7 +13,8 @@
 * { box-sizing:border-box; }
 html, body { margin:0; height:100%; background:transparent; color:var(--ink); overflow:hidden; -webkit-app-region:drag;
   font:13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased; user-select:none; }
-body { display:grid; grid-template-columns:220px 1fr; }
+:root { --side-w:220px; }
+body { display:grid; grid-template-columns:var(--side-w) 1fr; }
 /* the margin around the panels drags the window; the panels themselves do not */
 .side, .main { -webkit-app-region:no-drag; }
 button { font:inherit; color:inherit; background:none; border:0; cursor:default; }
@@ -93,14 +94,21 @@ h1 { font-size:22px; font-weight:700; letter-spacing:-.01em; margin:0 0 14px; }
 .link.inline:hover { text-decoration:underline; }
 
 /* narrow window: sidebar shrinks to icons */
+/* sidebar as an icon rail: set by width (renderer.js), not by window size, so it can be dragged to any width */
+body.rail .brand div, body.rail .nav span, body.rail .chip .chip-text, body.rail .chip .chip-act { display:none; }
+body.rail .brand { justify-content:center; padding:4px 0 12px; }
+body.rail .nav, body.rail .chip { justify-content:center; padding:8px 0; }
 @media (max-width: 620px) {
-  body { grid-template-columns:60px 1fr; }
-  .brand div, .nav span, .chip .chip-text, .chip .chip-act { display:none; }
-  .brand { justify-content:center; padding:4px 0 12px; }
-  .nav, .chip { justify-content:center; padding:8px 0; }
   .scroll { padding:18px 16px 24px; }
   .fr { grid-template-columns:100px 1fr; }
 }
+
+/* drag handle between the sidebar and the content */
+.split { position:fixed; top:8px; bottom:8px; left:calc(var(--side-w) - 4px); width:8px; cursor:col-resize; z-index:30; -webkit-app-region:no-drag; }
+.split::after { content:''; position:absolute; top:0; bottom:0; left:3px; width:2px; border-radius:1px; background:var(--accent); opacity:0; transition:opacity .15s; }
+.split:hover::after, .split.drag::after { opacity:.7; }
+.split.drag::before { content:''; position:fixed; inset:0; cursor:col-resize; -webkit-app-region:no-drag; } /* keeps mouse events flowing while dragging over drag regions */
+body.resizing { user-select:none; }
 
 /* profile playlist picker */
 .pick-row { display:grid; grid-template-columns:20px 1fr auto; gap:10px; align-items:center; padding:7px 12px; border-top:.5px solid var(--sep); min-height:36px; cursor:pointer; }

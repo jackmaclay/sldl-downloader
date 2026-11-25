@@ -1,5 +1,25 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
+
+/* ---------- resizable sidebar ---------- */
+// Narrower than SIDE_RAIL shows icons only. SIDE_MIN keeps the three window buttons inside the sidebar. A narrow window always uses the rail.
+const SIDE_MIN = 92; const SIDE_MAX = 360; const SIDE_RAIL = 150; const SIDE_DEFAULT = 220;
+let sideW = SIDE_DEFAULT;
+try { sideW = Math.max(SIDE_MIN, Math.min(SIDE_MAX, +localStorage.getItem('sideW') || SIDE_DEFAULT)); } catch { /* no storage */ }
+function applySide() {
+  const w = window.innerWidth < 620 ? SIDE_MIN : sideW;
+  document.documentElement.style.setProperty('--side-w', `${w}px`);
+  document.body.classList.toggle('rail', w < SIDE_RAIL);
+}
+const saveSide = () => { try { localStorage.setItem('sideW', String(sideW)); } catch { /* no storage */ } };
+applySide(); window.addEventListener('resize', applySide);
+$('split').addEventListener('mousedown', (e) => {
+  e.preventDefault(); $('split').classList.add('drag'); document.body.classList.add('resizing');
+  const move = (ev) => { sideW = Math.max(SIDE_MIN, Math.min(SIDE_MAX, ev.clientX + 4)); applySide(); };
+  const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); $('split').classList.remove('drag'); document.body.classList.remove('resizing'); saveSide(); };
+  window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+});
+$('split').addEventListener('dblclick', () => { sideW = SIDE_DEFAULT; applySide(); saveSide(); });
 const BLOCKS = 40;
 const blocksEl = $('blocks');
 for (let i = 0; i < BLOCKS; i++) blocksEl.appendChild(document.createElement('i'));

@@ -94,7 +94,15 @@ ipcMain.handle('download:run', async (_e, { name, items, saveToLibrary, first })
   for (const t of ['total', 'searching', 'progress', 'done', 'failed', 'reused']) ev.on(t, (e, counts) => push({ ...e, counts }));
   try { return await ev.done; } finally { job = null; }
 });
+let sending = 0; // a send to an iPod is in progress: do not eject or reset then
 ipcMain.handle('ipod:ready', () => ipod.ready());
+ipcMain.handle('ipod:reconnect', async (_e, { serial }) => { if (job || sending) throw new Error('Wait for the current download or send to finish.'); const d = await ipod.reconnect(serial); return { model: d.model, mount: d.volume.mount }; });
+ipcMain.handle('ipod:eject', async (_e, { serial }) => {
+  if (job || sending) throw new Error('Wait for the current download or send to finish.');
+  const d = (await devices.list()).find((x) => String(x.serial) === String(serial));
+  if (!d || !d.volume) throw new Error('That iPod is not mounted.');
+  await ipod.eject(d.volume.mount);
+});
 ipcMain.handle('ipod:setup', () => ipod.setup());
 ipcMain.handle('devices:music', () => devices.musicSources());
 const EXTERNAL = new Set(['https://www.slsknet.org/']);
@@ -115,7 +123,8 @@ ipcMain.handle('download:start', async (_e, { input, format, name }) => {
 });
 ipcMain.handle('download:cancel', () => { if (job && job.cancel) job.cancel(); });
 
-ipcMain.handle('send:run', async (_e, { folder, route, dest, name, layout, force }) => {
+ipcMain.handle('send:run', async (_e, args) => { sending++; try { return await sendRun(args); } finally { sending--; } });
+async function sendRun({ folder, route, dest, name, layout, force }) {
   const tracks = sldl.listTracks(folder);
   const plName = name || path.basename(folder);
   if (route === 'ipod') {
@@ -134,4 +143,4 @@ ipcMain.handle('send:run', async (_e, { folder, route, dest, name, layout, force
     folder, dest, playlist: plName, layout,
     onProgress: (p) => push({ type: 'copy', ...p }),
   })) };
-});
+}

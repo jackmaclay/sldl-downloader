@@ -92,7 +92,7 @@ async function list(opts = {}) {
       status: recovery ? 'recovery' : vol ? (vol.hasDb ? 'ready' : 'disk-mode') : 'unmounted',
       volume: vol,
       notes: recovery ? ['The iPod is in recovery/DFU: its own firmware is not running.']
-        : !vol ? ['On USB but not mounted. It was probably ejected: unplug it and plug it back in.']
+        : !vol ? ['On USB but not mounted. It was probably ejected: run `sldl-dl reconnect` (or press Reconnect in the app) to mount it again without unplugging.']
         : !vol.hasDb ? ['Mounted as a plain disk with no library database. A bricked iPod looks like this.'] : [],
     });
   }

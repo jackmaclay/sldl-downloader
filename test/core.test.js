@@ -223,3 +223,11 @@ test('files are named from Spotify data, and the iPod gets proper title and arti
   const side = JSON.parse(fs.readFileSync(path.join(ipod, 'P', '.tags.json'), 'utf8'));
   assert.deepStrictEqual(side[path.basename(want, '.mp3')], { title: 'Spooky - Recorded at RAK Studios, London', artist: 'Maribou State, Holly Walker' });
 });
+
+test('ipod.reconnect: returns an already mounted iPod untouched, and refuses one that is not on USB', async () => {
+  const ipod = require('../src/ipod');
+  const mounted = { model: 'iPod classic', serial: 'ABC123', volume: { mount: '/Volumes/iPod' } };
+  assert.strictEqual(await ipod.reconnect('abc123', { list: async () => [mounted] }), mounted);   // no USB reset when it is already mounted
+  await assert.rejects(ipod.reconnect('ZZZ', { list: async () => [mounted] }), /not on USB/);
+  await assert.rejects(ipod.eject('/etc'), /Not an iPod volume/);                                   // never ejects anything outside /Volumes
+});

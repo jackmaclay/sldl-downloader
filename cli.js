@@ -24,6 +24,8 @@ Usage
   space limit (default 14.5 GB, or --limit-gb). If it does not fit, nothing is downloaded: it lists
   the playlists and sizes, and you choose with --playlists 1,3. A pick that is over the limit is refused.
   sldl-dl devices                 list connected iPods and their state
+  sldl-dl eject [classic|nano]     eject a mounted iPod (it stays on USB)
+  sldl-dl reconnect [classic|nano] mount an ejected iPod again without unplugging it
   sldl-dl send <folder> [--ipod | --music | --to DEST] [--name NAME] [--layout rockbox|flat]
   sldl-dl config [get|set KEY VALUE]   keys: user, pass, path, pref-format, name-format, allow-flac (FLAC is off by default; mp3 is used)
   sldl-dl ipod-setup              one-off: install the helper that writes to a stock iPod
@@ -164,6 +166,23 @@ async function main() {
     if (!folder) throw new Error('Give the playlist folder.');
     const tracks = sldl.listTracks(folder);
     return deliver(out, flags, folder, tracks, flags.name || path.basename(path.resolve(folder)));
+  }
+
+  if (cmd === 'eject' || cmd === 'reconnect') {
+    const want = String(pos[0] || '').toLowerCase();
+    const list = (await devices.list()).filter((d) => !want || d.model.toLowerCase().includes(want) || String(d.serial).toLowerCase() === want);
+    if (!list.length) throw new Error('No matching iPod on USB.');
+    for (const d of list) {
+      if (cmd === 'eject') {
+        if (!d.volume) { out.info(`${d.model}: not mounted`); continue; }
+        await ipod.eject(d.volume.mount); out.info(`${d.model}: ejected. Reconnect it with: sldl-dl reconnect`);
+      } else {
+        if (d.volume) { out.info(`${d.model}: already mounted at ${d.volume.mount}`); continue; }
+        out.info(`${d.model}: reconnecting...`);
+        const r = await ipod.reconnect(d.serial); out.info(`${d.model}: mounted at ${r.volume.mount}`);
+      }
+    }
+    return;
   }
 
   if (cmd === 'devices') {

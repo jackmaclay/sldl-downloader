@@ -11,6 +11,7 @@ const VENV = path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config
 const PY = path.join(VENV, 'bin', 'python');
 // Python cannot read inside app.asar; electron-builder unpacks tools/ next to it.
 const SCRIPT = path.join(__dirname, '..', 'tools', 'ipod_add.py').replace('app.asar', 'app.asar.unpacked');
+const RECONNECT = path.join(__dirname, '..', 'tools', 'ipod_reconnect.py').replace('app.asar', 'app.asar.unpacked');
 
 const ready = () => fs.existsSync(PY);
 
@@ -21,7 +22,7 @@ const sh = (cmd, args) => new Promise((resolve, reject) => {
 // One-off: private Python env with pygpod. Needs network once.
 async function setup() {
   if (!ready()) await sh('/usr/bin/python3', ['-m', 'venv', VENV]);
-  await sh(PY, ['-m', 'pip', 'install', '-q', 'pygpod[tags]']);
+  await sh(PY, ['-m', 'pip', 'install', '-q', 'pygpod[tags]', 'pyusb', 'libusb-package']);
   return { venv: VENV };
 }
 
@@ -50,4 +51,29 @@ function addToIpod({ mount, guid, playlist, files, onEvent = () => {} }) {
   });
 }
 
-module.exports = { setup, addToIpod, ready, guidOf, VENV };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Make an ejected iPod that is still on USB mount again, without unplugging it. serial = its USB serial (its FireWire GUID).
+async function reconnect(serial, { waitMs = 25000, list } = {}) {
+  const devices = require('./devices');
+  const find = async () => (await (list || devices.list)()).find((d) => String(d.serial).toUpperCase() === String(serial).toUpperCase());
+  const d = await find();
+  if (!d) throw new Error('That iPod is not on USB. Unplug it and plug it back in.');
+  if (d.volume) return d; // already mounted
+  if (!ready()) throw new Error('The iPod helper is not installed. Run: sldl-dl ipod-setup');
+  const out = await new Promise((resolve) => execFile(PY, [RECONNECT, String(serial)], { timeout: 30000 }, (err, so) => resolve(so || '')));
+  let r = {}; try { r = JSON.parse(out.trim().split('\n').pop()); } catch { /* none */ }
+  if (!r.ok) throw new Error(r.error || 'The USB reset did not work. Unplug it and plug it back in.');
+  for (const t0 = Date.now(); Date.now() - t0 < waitMs;) { await sleep(1500); const cur = await find(); if (cur && cur.volume) return cur; }
+  throw new Error('The iPod did not mount within 25 seconds. Unplug it and plug it back in.');
+}
+
+// Eject (unmount and detach) a mounted iPod volume. Reconnect brings it back.
+function eject(mount) {
+  return new Promise((resolve, reject) => {
+    if (!mount || !String(mount).startsWith('/Volumes/')) return reject(new Error('Not an iPod volume.'));
+    execFile('/usr/sbin/diskutil', ['eject', mount], { timeout: 60000 }, (err, so, se) => (err ? reject(new Error((se || so || err.message).trim())) : resolve(so.trim())));
+  });
+}
+
+module.exports = { setup, addToIpod, reconnect, eject, ready, guidOf, VENV };

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   checkExisting: call('existing:check'),
   runPlaylist: call('download:run'),
   ipodReady: call('ipod:ready'),
+  ipodReconnect: call('ipod:reconnect'),
+  ipodEject: call('ipod:eject'),
   ipodSetup: call('ipod:setup'),
   musicSources: call('devices:music'),
   startDownload: call('download:start'),

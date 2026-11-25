@@ -6,6 +6,8 @@ const sldl = require('./src/sldl');
 const devices = require('./src/devices');
 const sync = require('./src/sync');
 const ipod = require('./src/ipod');
+const spotify = require('./src/spotify');
+const prefs = require('./src/prefs');
 
 let win;
 let job = null;
@@ -31,19 +33,29 @@ app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWind
 
 const push = (data) => { if (win && !win.isDestroyed()) win.webContents.send('dl:event', data); };
 
-ipcMain.handle('settings:get', () => conf.redact(conf.read()));
+ipcMain.handle('settings:get', () => ({ ...conf.redact(conf.read()), allowFlac: prefs.read().allowFlac }));
 ipcMain.handle('settings:save', (_e, values) => {
   const clean = {};
   for (const k of conf.KEYS) if (typeof values[k] === 'string') clean[k] = values[k].trim();
   if (clean.pass === '********') delete clean.pass; // unchanged
   conf.write(clean);
-  return conf.redact(conf.read());
+  if (typeof values.allowFlac === 'boolean') prefs.write({ allowFlac: values.allowFlac });
+  return { ...conf.redact(conf.read()), allowFlac: prefs.read().allowFlac };
 });
 ipcMain.handle('dialog:folder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Choose' });
   return r.canceled ? null : r.filePaths[0];
 });
 ipcMain.handle('devices:list', () => devices.list());
+// A profile URL: list its public playlists with size estimates, and how much room the target has.
+ipcMain.handle('profile:list', async (_e, { input }) => {
+  const user = spotify.parseProfile(input);
+  if (!user) throw new Error('That is not a Spotify profile link.');
+  const playlists = await spotify.profilePlaylists(user);
+  const dev = (await devices.list()).find((d) => d.volume && d.volume.free);
+  const budget = dev ? Math.floor(dev.volume.free * 0.97) : spotify.DEFAULT_BUDGET;
+  return { user, playlists, format: prefs.resolveFormat(null, conf.read()['pref-format']), rates: spotify.RATES, budget, budgetFrom: dev ? `${dev.model} (free space)` : 'a 16 GB iPod' };
+});
 ipcMain.handle('ipod:ready', () => ipod.ready());
 ipcMain.handle('ipod:setup', () => ipod.setup());
 ipcMain.handle('devices:music', () => devices.musicSources());

@@ -1,12 +1,13 @@
 {
   "name": "sldl-downloader",
   "productName": "SLDL Downloader",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Download Spotify playlists via Soulseek and put them on a player",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --mac",
+    "release": "tools/release.sh",
     "build-all": "electron-builder --mac --win --linux",
     "test": "node --test test/core.test.js",
     "shot": "electron test/shot.js",
@@ -20,7 +21,8 @@
       "**/*",
       "!resources/sldl",
       "!test/**",
-      "!dist/**"
+      "!dist/**",
+      "!build/entitlements.mac.plist"
     ],
     "extraResources": [
       {
@@ -40,7 +42,11 @@
       "icon": "build/icon.icns",
       "extendInfo": {
         "NSAppleEventsUsageDescription": "SLDL Downloader adds your downloaded playlists to the Music app."
-      }
+      },
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "SLDL Downloader",
@@ -53,7 +59,10 @@
     "linux": {
       "target": "AppImage",
       "category": "Audio"
-    }
+    },
+    "asarUnpack": [
+      "tools/**"
+    ]
   },
   "devDependencies": {
     "electron": "^39.2.3",

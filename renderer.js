@@ -18,7 +18,7 @@ $('chip').addEventListener('click', () => show('player'));
 const text = (tag, cls, str) => { const e = document.createElement(tag); if (cls) e.className = cls; e.textContent = str; return e; };
 
 /* ---------- download ---------- */
-let state = { total: 0, done: 0, failed: 0, folder: null, dest: null };
+let state = { total: 0, done: 0, failed: 0, folder: null, folders: [], dest: null };
 
 function paint(frac, fail) {
   const on = Math.round(Math.max(0, Math.min(1, frac)) * BLOCKS);
@@ -27,7 +27,7 @@ function paint(frac, fail) {
 }
 function resetRun() {
   $('run').hidden = false;
-  state = { ...state, total: 0, done: 0, failed: 0, folder: null };
+  state = { ...state, total: 0, done: 0, failed: 0, folder: null, folders: [] };
   paint(0); $('tracks').replaceChildren(text('div', 'empty', 'Searching...')); $('log').textContent = '';
   $('stat-main').textContent = 'Starting...'; $('stat-count').textContent = ''; $('send-card').hidden = true;
 }
@@ -51,25 +51,103 @@ window.api.onEvent((e) => {
   }
 });
 
-$('start').addEventListener('click', async () => {
-  const input = $('url').value.trim();
-  if (!input) { setStatus('Paste a Spotify playlist URL first.', 'err'); return; }
-  resetRun(); setStatus('');
-  $('start').disabled = true; $('cancel').hidden = false;
+const isProfile = (u) => /^https?:\/\/open\.spotify\.com\/(intl-[a-z]+\/)?user\//i.test(u) || /^spotify:user:/i.test(u);
+let cancelled = false;
+
+// Runs one sldl download and updates the progress UI. Returns the result, or throws.
+async function runOne({ input, name, format, label }) {
+  state = { ...state, total: 0, done: 0, failed: 0 };
+  paint(0); $('stat-main').textContent = `${label}Starting...`; $('stat-count').textContent = '';
+  const r = await window.api.startDownload({ input, format, name });
+  if (!r.ok && !cancelled) throw new Error(`sldl stopped with code ${r.code}. Check your Soulseek login in Settings.`);
+  paint(r.total ? (r.done + r.failed) / r.total : 1, r.failed && !r.done);
+  return r;
+}
+function finishUi(results) {
+  const done = results.reduce((n, r) => n + r.done, 0); const failed = results.reduce((n, r) => n + r.failed, 0);
+  state.folders = results.filter((r) => r.folder && r.tracks.length).map((r) => r.folder); state.folder = state.folders[0] || null;
+  $('stat-main').textContent = done ? (cancelled ? 'Stopped' : 'Finished') : 'Finished, nothing downloaded';
+  setStatus(state.folders.length ? `${done} downloaded${failed ? `, ${failed} not found` : ''}${results.length > 1 ? `, ${state.folders.length} playlists` : ''}.` : 'No folder was created.', done ? 'ok' : 'err');
+  $('send-card').hidden = !state.folders.length;
+  if (!$('send-card').hidden) syncRouteUi();
+}
+async function runMany(list, format) {
+  resetRun(); setStatus(''); cancelled = false;
+  $('start').disabled = true; $('pick-go').disabled = true; $('cancel').hidden = false;
+  const results = [];
   try {
-    const r = await window.api.startDownload({ input, format: $('format').value, name: $('name').value.trim() });
-    if (!r.ok) throw new Error(`sldl stopped with code ${r.code}. Check your Soulseek login in Settings.`);
-    paint(r.total ? (r.done + r.failed) / r.total : 1, r.failed && !r.done);
-    $('stat-main').textContent = r.done ? 'Finished' : 'Finished, nothing downloaded';
-    state.folder = r.folder;
-    setStatus(r.folder ? `${r.done} downloaded${r.failed ? `, ${r.failed} not found` : ''}.` : 'No folder was created.', r.done ? 'ok' : 'err');
-    $('send-card').hidden = !(r.folder && r.tracks.length);
-    if (!$('send-card').hidden) syncRouteUi();
+    for (let i = 0; i < list.length && !cancelled; i++) {
+      const p = list[i];
+      results.push(await runOne({ input: p.url, name: p.name, format, label: list.length > 1 ? `Playlist ${i + 1} of ${list.length}, ` : '' }));
+    }
+    finishUi(results);
   } catch (err) {
     $('stat-main').textContent = 'Stopped'; setStatus(clean(err), 'err'); paint(state.total ? (state.done + state.failed) / state.total : 0, true);
-  } finally { $('start').disabled = false; $('cancel').hidden = true; }
+    if (results.length) finishUi(results);
+  } finally { $('start').disabled = false; $('pick-go').disabled = false; $('cancel').hidden = true; }
+}
+
+$('start').addEventListener('click', async () => {
+  const input = $('url').value.trim();
+  if (!input) { setStatus('Paste a Spotify playlist or profile link first.', 'err'); return; }
+  $('pick').hidden = true;
+  if (isProfile(input)) return openPicker(input);
+  await runMany([{ url: input, name: $('name').value.trim() }], $('format').value);
 });
-$('cancel').addEventListener('click', () => window.api.cancelDownload());
+
+/* ---------- profile picker ---------- */
+let prof = null;
+const GB = (n) => (n / 1e9).toFixed(1);
+const profileFormat = async () => $('format').value || prof.format;
+function sizeOf(p, fmt) { return p.seconds * (prof.rates[fmt] || prof.rates.mp3) * 125; }
+
+async function openPicker(input) {
+  setStatus('Reading profile...'); $('start').disabled = true;
+  try {
+    prof = await window.api.profile({ input });
+    prof.fmt = await profileFormat();
+    if (!prof.playlists.length) { setStatus('That profile has no public playlists.', 'err'); return; }
+    const total = prof.playlists.reduce((n, p) => n + sizeOf(p, prof.fmt), 0);
+    prof.fits = total <= prof.budget;
+    const box = $('pick-list'); box.replaceChildren();
+    prof.playlists.forEach((p, i) => {
+      const row = text('label', 'pick-row', ''); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = prof.fits; cb.dataset.i = i;
+      row.append(cb, text('span', 't', p.name || 'Untitled'), text('span', 'dim', ''));
+      cb.addEventListener('change', () => togglePick(cb));
+      box.appendChild(row);
+    });
+    $('pick').hidden = false; setStatus('');
+    refreshPicker(prof.fits ? `Everything fits (${GB(total)} GB of ${GB(prof.budget)} GB), so all ${prof.playlists.length} playlists are selected.`
+      : `${GB(total)} GB is more than the ${GB(prof.budget)} GB available on ${prof.budgetFrom}. Choose which playlists to take.`);
+  } catch (err) { setStatus(clean(err), 'err'); } finally { $('start').disabled = false; }
+}
+const picked = () => [...$('pick-list').querySelectorAll('input')].filter((c) => c.checked).map((c) => prof.playlists[+c.dataset.i]);
+function refreshPicker(msg) {
+  const used = picked().reduce((n, p) => n + sizeOf(p, prof.fmt), 0);
+  [...$('pick-list').children].forEach((row, i) => {
+    const cb = row.querySelector('input'); const p = prof.playlists[i]; const sz = sizeOf(p, prof.fmt);
+    row.lastChild.textContent = `${p.tracks} tracks, ${GB(sz)} GB`;
+    const blocked = !cb.checked && used + sz > prof.budget; // never let the selection go over the limit
+    cb.disabled = blocked; row.classList.toggle('off', blocked);
+  });
+  $('pick-cap').textContent = `Playlists: ${GB(used)} of ${GB(prof.budget)} GB`;
+  $('pick-go').disabled = !picked().length;
+  $('pick-note').className = 'note'; $('pick-note').textContent = msg || '';
+}
+function togglePick(cb) {
+  const used = picked().reduce((n, p) => n + sizeOf(p, prof.fmt), 0);
+  if (used > prof.budget) { cb.checked = false; refreshPicker('That one would not fit.'); return; }
+  refreshPicker('');
+}
+$('format').addEventListener('change', async () => {
+  if (!prof || $('pick').hidden) return;
+  prof.fmt = await profileFormat();
+  const checked = () => [...$('pick-list').querySelectorAll('input')].filter((c) => c.checked);
+  while (picked().reduce((n, p) => n + sizeOf(p, prof.fmt), 0) > prof.budget) checked().pop().checked = false; // a bigger format may no longer fit
+  refreshPicker('Sizes updated for the new format.');
+});
+$('pick-go').addEventListener('click', () => { const list = picked(); if (list.length) runMany(list, $('format').value); });
+$('cancel').addEventListener('click', () => { cancelled = true; window.api.cancelDownload(); });
 function setStatus(msg, kind) { const n = $('status'); n.textContent = msg; n.className = 'note' + (kind ? ' ' + kind : ''); }
 const clean = (err) => String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
@@ -94,9 +172,15 @@ $('send').addEventListener('click', async () => {
       note.textContent = 'Installing the iPod helper (one-off, needs internet)...';
       await window.api.ipodSetup(); note.textContent = '';
     }
-    const r = await window.api.send({ folder: state.folder, route, dest: state.dest, name: $('name').value.trim() || undefined, layout: $('layout').value });
+    const folders = state.folders.length ? state.folders : [state.folder];
+    const sum = { added: 0, skipped: 0, of: 0, copied: 0 };
+    for (const folder of folders) {
+      const r = await window.api.send({ folder, route, dest: state.dest, name: folders.length === 1 ? ($('name').value.trim() || undefined) : undefined, layout: $('layout').value });
+      for (const k of Object.keys(sum)) sum[k] += r[k] || 0;
+    }
     note.className = 'note ok';
-    note.textContent = route === 'ipod' ? `iPod updated: ${r.added} added, ${r.skipped} already there. Eject it before unplugging.` : route === 'music' ? `Added ${r.added} of ${r.of} tracks to Music.` : `Copied ${r.copied} files.`;
+    note.textContent = route === 'ipod' ? `iPod updated: ${sum.added} added, ${sum.skipped} already there. Eject it before unplugging.`
+      : route === 'music' ? `Added ${sum.added} of ${sum.of} tracks to Music.` : `Copied ${sum.copied} files.`;
   } catch (err) { note.className = 'note err'; note.textContent = clean(err); }
   finally { $('send').disabled = false; }
 });
@@ -139,10 +223,22 @@ window.api.devices().then(updateChip).catch(() => {});
 setInterval(() => window.api.devices().then(updateChip).catch(() => {}), 15000);
 
 /* ---------- settings ---------- */
+// MP3 is the default. FLAC (and flac,mp3) only appear once "Allow FLAC" is on.
+function applyFlac(allowed) {
+  for (const [sel, extra] of [[$('format'), ['flac']], [$('s-format'), ['flac', 'flac,mp3']]]) {
+    [...sel.options].filter((o) => o.value.startsWith('flac')).forEach((o) => o.remove());
+    if (allowed) for (const v of extra) sel.appendChild(new Option(v, v));
+    else if (sel.value.startsWith('flac')) sel.value = sel.id === 'format' ? '' : 'mp3';
+  }
+}
+window.api.getSettings().then((c) => applyFlac(c.allowFlac)).catch(() => {});
+$('s-flac').addEventListener('change', () => applyFlac($('s-flac').checked));
 async function loadSettings() {
   const c = await window.api.getSettings();
   $('s-user').value = c.user || ''; $('s-pass').value = c.pass || '';
+  applyFlac(c.allowFlac); $('s-flac').checked = !!c.allowFlac;
   $('s-path').textContent = c.path || 'Not set'; $('s-format').value = c['pref-format'] || 'mp3';
+  if (!$('s-format').value) $('s-format').value = 'mp3';
   $('s-namefmt').value = c['name-format'] || ''; $('s-note').textContent = '';
 }
 $('s-path-btn').addEventListener('click', async () => { const p = await window.api.pickFolder(); if (p) $('s-path').textContent = p; });
@@ -150,7 +246,7 @@ $('s-save').addEventListener('click', async () => {
   const path = $('s-path').textContent;
   await window.api.saveSettings({
     user: $('s-user').value, pass: $('s-pass').value, path: path === 'Not set' ? '' : path,
-    'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value,
+    'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value, allowFlac: $('s-flac').checked,
   });
   $('s-note').className = 'note ok'; $('s-note').textContent = 'Saved.';
 });

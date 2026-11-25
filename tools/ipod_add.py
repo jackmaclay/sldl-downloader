@@ -32,33 +32,47 @@ def main():
             f.write("FirewireGuid: 0x%s\n" % guid)
 
     db = pygpod.Database(mount)
-    existing = {(t.title, t.artist, t.album) for t in db.tracks}
+    norm = lambda x: " ".join(str(x or "").lower().split())
+    index = {(norm(t.title), norm(t.artist)): t for t in db.tracks}  # songs already on the iPod
     pl = db.get_playlist(playlist) if playlist else None
     if playlist and pl is None:
         pl = db.create_playlist(playlist)
+    in_pl = {t.track_id for t in pl.tracks} if pl is not None else set()
+
+    def tags(path):
+        try:
+            from mutagen import File
+            m = File(path, easy=True)
+            return (m.get("title") or [""])[0], (m.get("artist") or [""])[0]
+        except Exception:
+            return "", ""
 
     added = skipped = 0
     for i, path in enumerate(files, 1):
+        name = os.path.basename(path)
         try:
-            t = db.add_track(path, convert=True)
-            key = (t.title, t.artist, t.album)
-            if key in existing:  # same song already on the iPod
-                db.remove_track(t)
+            title, artist = tags(path)
+            t = index.get((norm(title), norm(artist))) if title else None
+            if t is not None:  # already on the iPod: reuse it, and make sure it is in this playlist
+                if pl is not None and t.track_id not in in_pl:
+                    db.add_track_to_playlist(pl, t); in_pl.add(t.track_id)
                 skipped += 1
-                emit(type="track", n=i, of=len(files), file=os.path.basename(path), status="already there")
+                emit(type="track", n=i, of=len(files), file=name, status="already there")
                 continue
-            existing.add(key)
+            t = db.add_track(path, convert=True)
+            index[(norm(t.title), norm(t.artist))] = t
             if pl is not None:
-                db.add_track_to_playlist(pl, t)
+                db.add_track_to_playlist(pl, t); in_pl.add(t.track_id)
             added += 1
-            emit(type="track", n=i, of=len(files), file=os.path.basename(path), status="added")
+            emit(type="track", n=i, of=len(files), file=name, status="added")
         except Exception as e:  # one bad file should not stop the rest
-            emit(type="track", n=i, of=len(files), file=os.path.basename(path), status="failed", msg=str(e))
+            emit(type="track", n=i, of=len(files), file=name, status="failed", msg=str(e))
     db.save()
 
     # The iPod checks the hash58 signature; pygpod's save only refreshes hash72.
     p = os.path.join(mount, "iPod_Control", "iTunes", "iTunesDB")
     data = open(p, "rb").read()
+    assert len(data) > 1000, "iTunesDB is empty, refusing to sign"
     open(p, "wb").write(compute_hash58(data, guid))
     emit(type="done", added=added, skipped=skipped, total=len(db.tracks))
     return 0

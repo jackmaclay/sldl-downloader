@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const conf = require('./conf');
+const os = require('os');
+const prefs = require('./prefs');
 
 const AUDIO = /\.(flac|mp3|m4a|aac|ogg|opus|wav|alac)$/i;
 
@@ -58,8 +60,23 @@ function listTracks(folder) {
   return fs.readdirSync(folder).filter((f) => AUDIO.test(f)).sort().map((f) => path.join(folder, f));
 }
 
+// With no Spotify API login, sldl cannot read a playlist link. Build a CSV from Spotify's public embed data instead.
+async function prepareInput(input, c, log) {
+  const spotify = require('./spotify');
+  const id = spotify.playlistId(input);
+  if (!id || c['spotify-id']) return input;
+  const pl = await spotify.playlistTracks(id);
+  if (!pl.tracks.length) throw new Error('Spotify listed no tracks for that playlist.');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sldl-csv-'));
+  const file = path.join(dir, `${slug(pl.name) || id}.csv`);
+  fs.writeFileSync(file, spotify.toCsv(pl.tracks));
+  log(`No Spotify login set: using the public track list (${pl.tracks.length} tracks).`);
+  if (pl.capped) log('Note: Spotify only lists the first 100 tracks without a login. A longer playlist is cut off.');
+  return file;
+}
+
 // download(): returns an EventEmitter with a .done promise. Events: line, total, searching, progress, done, failed.
-function download({ input, outDir, format, name, bin = findBinary() }) {
+function download({ input, outDir, format, name, bin = findBinary(), csvFallback = true }) {
   const ev = new EventEmitter();
   const c = conf.read();
   const dir = outDir || c.path;
@@ -68,8 +85,9 @@ function download({ input, outDir, format, name, bin = findBinary() }) {
     if (!dir) return reject(new Error('No download folder set. Choose one in Settings or pass --out.'));
     fs.mkdirSync(dir, { recursive: true });
     const before = snapshot(dir);
-    const args = [input, '--path', dir, '--no-progress'];
-    if (format) args.push('--pref-format', format);
+    (csvFallback ? prepareInput(input, c, (line) => ev.emit('line', line)) : Promise.resolve(input)).then((realInput) => {
+    const args = [realInput, '--path', dir, '--no-progress'];
+    args.push('--pref-format', prefs.resolveFormat(format, c['pref-format'])); // mp3 unless FLAC is switched on
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     ev.cancel = () => child.kill('SIGTERM');
     const counts = { total: 0, done: 0, failed: 0 };
@@ -97,6 +115,7 @@ function download({ input, outDir, format, name, bin = findBinary() }) {
       try { org = organise(dir, before, name); } catch (err) { ev.emit('line', `Could not organise: ${err.message}`); }
       resolve({ code, ok: code === 0, ...counts, ...org, tracks: org.folder ? listTracks(org.folder) : [] });
     });
+      }).catch(reject);
   });
   return ev;
 }

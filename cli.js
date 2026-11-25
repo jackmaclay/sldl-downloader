@@ -7,15 +7,21 @@ const sldl = require('./src/sldl');
 const devices = require('./src/devices');
 const sync = require('./src/sync');
 const ipod = require('./src/ipod');
+const spotify = require('./src/spotify');
+const prefs = require('./src/prefs');
 
 const HELP = `sldl-dl: download Spotify playlists from Soulseek and put them on a player
 
 Usage
-  sldl-dl download <spotify-url|search> [--out DIR] [--format flac|mp3|m4a] [--name NAME]
+  sldl-dl download <spotify-url|search> [--out DIR] [--format mp3|m4a|flac] [--name NAME]
                                          [--ipod] [--music] [--to DEST] [--layout rockbox|flat]
+                                         [--playlists 1,3] [--limit-gb N]   (profile links only)
+  Profile links (open.spotify.com/user/...) download every public playlist if it all fits the
+  space limit (default 14.5 GB, or --limit-gb). If it does not fit, nothing is downloaded: it lists
+  the playlists and sizes, and you choose with --playlists 1,3. A pick that is over the limit is refused.
   sldl-dl devices                 list connected iPods and their state
   sldl-dl send <folder> [--ipod | --music | --to DEST] [--name NAME] [--layout rockbox|flat]
-  sldl-dl config [get|set KEY VALUE]   keys: user, pass, path, pref-format, name-format
+  sldl-dl config [get|set KEY VALUE]   keys: user, pass, path, pref-format, name-format, allow-flac (FLAC is off by default; mp3 is used)
   sldl-dl ipod-setup              one-off: install the helper that writes to a stock iPod
   sldl-dl doctor                  check sldl, login, folder and device
   sldl-dl help
@@ -87,6 +93,41 @@ async function main() {
 
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') return console.log(HELP);
 
+  if (cmd === 'download' && spotify.parseProfile(pos[0])) {
+    const user = spotify.parseProfile(pos[0]);
+    out.info(`Reading ${user}'s public playlists...`);
+    const lists = await spotify.profilePlaylists(user);
+    if (!lists.length) throw new Error('That profile has no public playlists.');
+    const fmt = prefs.resolveFormat(flags.format, conf.read()['pref-format']);
+    const budget = flags['limit-gb'] ? Math.floor(parseFloat(flags['limit-gb']) * 1e9) : spotify.DEFAULT_BUDGET;
+    const size = (p) => spotify.bytesFor(p.seconds, fmt);
+    const gb = (n) => (n / 1e9).toFixed(1);
+    lists.forEach((p, i) => out.info(`${String(i + 1).padStart(2)}. ${p.name}  (${p.tracks} tracks, ~${gb(size(p))} GB as ${fmt})`, { type: 'playlist', n: i + 1, ...p, bytes: size(p) }));
+    let chosen = lists;
+    if (flags.playlists) {
+      chosen = flags.playlists.split(',').map((n) => lists[parseInt(n, 10) - 1]).filter(Boolean);
+      if (!chosen.length) throw new Error('--playlists matched nothing. Use the numbers above.');
+    }
+    const total = chosen.reduce((n, p) => n + size(p), 0);
+    if (total > budget) {
+      out.info(`Estimated ${gb(total)} GB is over the ${gb(budget)} GB limit. Nothing downloaded. Pick playlists that fit: --playlists 1,3 (or raise --limit-gb).`);
+      process.exitCode = 2; return;
+    }
+    out.info(`Downloading ${chosen.length} playlist${chosen.length > 1 ? 's' : ''}, ~${gb(total)} GB of ${gb(budget)} GB.`);
+    for (const p of chosen) {
+      out.info(`--- ${p.name}`);
+      const ev = sldl.download({ input: p.url, outDir: flags.out, format: flags.format, name: p.name });
+      ev.on('total', (e) => out.info(`Found ${e.total} tracks`, { type: 'total', total: e.total }));
+      ev.on('done', (e, c) => out.info(`[${c.done}/${c.total}] ${e.track}`, { type: 'track', track: e.track, ...c }));
+      ev.on('failed', (e) => out.info(`Failed: ${e.track}`, { type: 'failed', track: e.track }));
+      const r = await ev.done;
+      if (!r.ok) throw new Error(`sldl exited with code ${r.code} on "${p.name}"`);
+      out.info(`Done: ${r.done} downloaded, ${r.failed} not found.`, { type: 'finished', ...r });
+      if (r.folder) await deliver(out, flags, r.folder, r.tracks, p.name);
+    }
+    return;
+  }
+
   if (cmd === 'download') {
     const ev = sldl.download({ input: pos[0], outDir: flags.out, format: flags.format, name: flags.name });
     ev.on('line', (l) => { if (!flags.json && process.env.SLDL_VERBOSE) console.log(l); });
@@ -122,7 +163,11 @@ async function main() {
 
   if (cmd === 'config') {
     const [sub = 'get', key, ...val] = pos;
-    if (sub === 'get') return out.data(conf.redact(conf.read()));
+    if (sub === 'get') return out.data({ ...conf.redact(conf.read()), 'allow-flac': prefs.read().allowFlac });
+    if (sub === 'set' && key === 'allow-flac') {
+      prefs.write({ allowFlac: /^(1|true|yes|on)$/i.test(val.join(' ')) });
+      return console.log(`FLAC is ${prefs.read().allowFlac ? 'on' : 'off'}.`);
+    }
     if (sub === 'set') {
       if (!conf.KEYS.includes(key)) throw new Error(`Unknown key. Use one of: ${conf.KEYS.join(', ')}`);
       conf.write({ [key]: val.join(' ') });

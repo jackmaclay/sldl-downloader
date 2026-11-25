@@ -9,7 +9,8 @@ const { AUDIO } = require('./sldl');
 
 const VENV = path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config', 'sldl'), 'venv');
 const PY = path.join(VENV, 'bin', 'python');
-const SCRIPT = path.join(__dirname, '..', 'tools', 'ipod_add.py');
+// Python cannot read inside app.asar; electron-builder unpacks tools/ next to it.
+const SCRIPT = path.join(__dirname, '..', 'tools', 'ipod_add.py').replace('app.asar', 'app.asar.unpacked');
 
 const ready = () => fs.existsSync(PY);
 

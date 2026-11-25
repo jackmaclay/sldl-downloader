@@ -31,6 +31,8 @@ Stored in sldl's own file, `~/.config/sldl/sldl.conf` (override with `SLDL_CONF`
 
 ## Sending to a player
 
+- Profile links: paste `open.spotify.com/user/...` to take every public playlist. Sizes are estimated from track lengths (mp3 320 kbit/s, m4a 256, flac 900) against the space on the connected iPod, or 14.5 GB if none is connected. If it all fits, everything is selected. If not, the app shows a picker that will not let the selection go over the limit; the CLI downloads nothing and asks for `--playlists 1,3`. Profile lookup renders the page in a hidden Electron window, since Spotify has no login-free list endpoint.
+- Formats: mp3 by default. FLAC is off until Settings, Allow FLAC (or `sldl-dl config set allow-flac true`). The flag is in `~/.config/sldl/app.json`, not `sldl.conf`.
 - iPod: `sldl-dl send <folder> --ipod` (or Send, Write to a connected iPod) adds the tracks and a playlist to a stock iPod's library. First use needs `sldl-dl ipod-setup` (pygpod, once, needs internet). ffmpeg converts FLAC.
 - Copy: files to `<dest>/Music/<playlist>/` and `<dest>/Playlists/<playlist>.m3u8`. For Rockbox and other mass-storage players. Refuses a stock iPod volume, which ignores files not in its iTunesDB.
 - Music: adds the files to a Music app playlist. Music must list the iPod as a device to sync it; on this Mac it does not.

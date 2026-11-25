@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: call('settings:save'),
   pickFolder: call('dialog:folder'),
   devices: call('devices:list'),
+  profile: call('profile:list'),
   ipodReady: call('ipod:ready'),
   ipodSetup: call('ipod:setup'),
   musicSources: call('devices:music'),

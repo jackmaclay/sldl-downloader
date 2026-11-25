@@ -29,16 +29,17 @@ function write(values, file = confPath()) {
   let lines = [];
   try { lines = fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { /* new file */ }
   const left = { ...values };
+  // sldl refuses "key =" with no value, so an empty value removes the key instead of writing it.
   lines = lines.map((raw) => {
     const m = raw.match(/^\s*([^#=\s][^=]*?)\s*=/);
     if (m && Object.prototype.hasOwnProperty.call(left, m[1])) {
       const v = left[m[1]]; delete left[m[1]];
-      return `${m[1]} = ${v}`;
+      return String(v).trim() === '' ? null : `${m[1]} = ${v}`;
     }
     return raw;
-  });
+  }).filter((l) => l !== null);
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
-  for (const [k, v] of Object.entries(left)) lines.push(`${k} = ${v}`);
+  for (const [k, v] of Object.entries(left)) if (String(v).trim() !== '') lines.push(`${k} = ${v}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, lines.join('\n') + '\n', { mode: 0o600 });
 }

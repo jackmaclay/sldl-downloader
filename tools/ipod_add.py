@@ -7,6 +7,7 @@ Writes to the iPod: SysInfo (FirewireGuid, only if missing), the track files, iT
 """
 import json
 import os
+import re
 import sys
 import warnings
 
@@ -27,6 +28,11 @@ def main():
 
     # Without the GUID the iPod's database signature cannot be computed.
     sysinfo = os.path.join(mount, "iPod_Control", "Device", "SysInfo")
+    if os.path.exists(sysinfo):
+        m = re.search(r"FirewireGuid:\s*0x([0-9A-Fa-f]+)", open(sysinfo).read())
+        if m and m.group(1).upper() != guid.upper():  # a wrong GUID would sign the database for a different iPod
+            emit(type="error", msg="This volume's iPod GUID (%s) does not match the device (%s). Refusing to write." % (m.group(1).upper(), guid.upper()))
+            return 1
     if not (os.path.exists(sysinfo) and "FirewireGuid" in open(sysinfo).read()):
         with open(sysinfo, "a") as f:
             f.write("FirewireGuid: 0x%s\n" % guid)

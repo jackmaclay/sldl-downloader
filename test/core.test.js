@@ -116,3 +116,21 @@ test('spotify: playlist ids and the CSV handed to sldl', () => {
   const csv = sp.toCsv([{ title: 'Say "Hi"', artist: 'A, B', seconds: 200 }]);
   assert.equal(csv, 'Artist,Album,Title,Length\n"A, B","","Say ""Hi""","200"\n');
 });
+
+test('devices.list pairs a volume with its own iPod by GUID, not by order', async () => {
+  const item = (pid, serial) => ({ _name: 'iPod', USBDeviceKeyVendorID: '0x05ac', USBDeviceKeyProductID: pid, USBDeviceKeySerialNumber: serial });
+  const profile = JSON.stringify({ SPUSBHostDataType: [{ _items: [item('0x1261', '1111111111111111'), item('0x1263', '2222222222222222')] }] });
+  // Only the nano is mounted; the classic is ejected but still on USB.
+  const vol = { mount: '/Volumes/iPod', hasDb: true, free: 1, total: 2, flags: [], guid: '2222222222222222' };
+  const list = await devices.list({ profile, mounts: [vol] });
+  const classic = list.find((d) => d.usbId === '0x1261'); const nano = list.find((d) => d.usbId === '0x1263');
+  assert.strictEqual(classic.volume, null);
+  assert.strictEqual(nano.volume.mount, '/Volumes/iPod');
+  assert.strictEqual(nano.status, 'ready');
+});
+
+test('inspectVolume reads the FireWire GUID from SysInfo', () => {
+  const v = tmp(); fs.mkdirSync(path.join(v, 'iPod_Control', 'Device'), { recursive: true });
+  fs.writeFileSync(path.join(v, 'iPod_Control', 'Device', 'SysInfo'), 'FirewireGuid: 0x2222222222222222\n');
+  assert.strictEqual(devices.inspectVolume(v).guid, '2222222222222222');
+});

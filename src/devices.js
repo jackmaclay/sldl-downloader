@@ -52,10 +52,12 @@ function inspectVolume(mount) {
   const hasDb = size(path.join(ctl, 'iTunes', 'iTunesDB')) > 0 || size(path.join(ctl, 'iTunes', 'iTunesCDB')) > 0;
   let free = null; let total = null;
   try { const s = fs.statfsSync(mount); free = s.bavail * s.bsize; total = s.blocks * s.bsize; } catch { /* ignore */ }
+  let guid = '';
+  try { const m = fs.readFileSync(path.join(ctl, 'Device', 'SysInfo'), 'utf8').match(/FirewireGuid:\s*0x([0-9a-f]+)/i); if (m) guid = m[1].toUpperCase(); } catch { /* none */ }
   const flags = [];
   if (sysInfo === 0) flags.push('SysInfo is empty');
   if (!hasDb) flags.push('no iTunesDB (library database missing)');
-  return { mount, sysInfoBytes: sysInfo, hasDb, free, total, flags };
+  return { mount, sysInfoBytes: sysInfo, hasDb, free, total, flags, guid };
 }
 
 // One call for the UI and CLI. status: none | recovery | disk-mode | ready
@@ -63,17 +65,30 @@ async function list(opts = {}) {
   const sp = opts.profile || (await run('/usr/sbin/system_profiler', ['SPUSBHostDataType', '-json'])).stdout;
   let usb = [];
   try { usb = usbApple(JSON.parse(sp)); } catch { /* no USB data */ }
-  const mounts = (opts.mounts || mountedIpods(opts.volumesDir)).map(inspectVolume);
+  const mounts = (opts.mounts || mountedIpods(opts.volumesDir)).map((m) => (typeof m === 'string' ? inspectVolume(m) : m));
   const devices = [];
+  // Several iPods can be on USB at once (an ejected one stays listed), so a volume is matched to its device
+  // by the FireWire GUID in SysInfo, which equals the USB serial. Volumes without a GUID are paired by order
+  // only when that is unambiguous.
+  const live = usb.filter((u) => !RECOVERY[u.pid]);
+  const byGuid = new Map();
+  for (const u of live) {
+    const i = mounts.findIndex((m) => m.guid && m.guid === String(u.serial || '').toUpperCase());
+    if (i >= 0) byGuid.set(u, mounts.splice(i, 1)[0]);
+  }
+  const unmatched = live.filter((u) => !byGuid.has(u));
+  const anon = mounts.filter((m) => !m.guid);
+  if (unmatched.length && unmatched.length === anon.length) unmatched.forEach((u) => { byGuid.set(u, anon.shift()); });
   for (const u of usb) {
     const recovery = RECOVERY[u.pid];
-    const vol = !recovery ? mounts.shift() : null;
+    const vol = recovery ? null : byGuid.get(u) || null;
+    if (vol) mounts.splice(mounts.indexOf(vol), 1);
     devices.push({
       model: MODELS[u.pid] || recovery || 'iPod',
       usbId: '0x' + u.pid.toString(16),
       serial: u.serial,
       status: recovery ? 'recovery' : vol ? (vol.hasDb ? 'ready' : 'disk-mode') : 'disk-mode',
-      volume: vol || null,
+      volume: vol,
       notes: recovery ? ['The iPod is in recovery/DFU: its own firmware is not running.']
         : vol && !vol.hasDb ? ['Mounted as a plain disk with no library database. A bricked iPod looks like this.'] : [],
     });

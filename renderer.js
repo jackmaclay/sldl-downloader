@@ -48,13 +48,13 @@ function paint(frac, fail) {
 }
 function resetRun() {
   $('run').hidden = false;
-  state = { ...state, total: 0, done: 0, failed: 0, folder: null, folders: [] };
+  state = { ...state, total: 0, done: 0, failed: 0, folder: null, folders: [] }; $('why').hidden = true;
   paint(0); $('tracks').replaceChildren(text('div', 'empty', 'Searching...')); $('log').textContent = '';
   $('stat-main').textContent = 'Starting...'; $('stat-count').textContent = ''; $('send-card').hidden = true;
 }
 function addTrack(name, fail, note) {
   const box = $('tracks'); if (box.firstChild && box.firstChild.className === 'empty') box.replaceChildren();
-  const row = text('div', fail ? 'trk fail' : 'trk', ''); row.append(text('span', 't', name), text('span', 'dim', fail ? 'not found' : (note || 'done')));
+  const row = text('div', fail ? 'trk fail' : 'trk', ''); row.append(text('span', 't', name), text('span', 'dim', fail ? 'not found on Soulseek' : (note || 'done')));
   box.appendChild(row); box.scrollTop = box.scrollHeight;
 }
 
@@ -89,6 +89,8 @@ function finishUi(results) {
   $('stat-main').textContent = (done || reused) ? (cancelled ? 'Stopped' : 'Finished') : 'Finished, nothing downloaded';
   const bits = [`${done} downloaded`]; if (reused) bits.push(`${reused} already had`); if (failed) bits.push(`${failed} not found`);
   setStatus(state.folders.length ? `${bits.join(', ')}${results.length > 1 ? `, ${state.folders.length} playlists` : ''}.` : 'No folder was created.', (done || reused) ? 'ok' : 'err');
+  const why = $('why'); why.hidden = !failed || !!cancelled;
+  if (failed) why.textContent = `${failed} song${failed === 1 ? '' : 's'} could not be downloaded. Soulseek is a network of people sharing their own music, so a song is missing when nobody who has it is online right now, when nobody shares it, or when the copies on offer are the wrong song or length. Try again later: songs you already have are not downloaded again, so only the missing ones are searched for.`;
   $('send-card').hidden = !state.folders.length;
   if (!$('send-card').hidden) syncRouteUi();
 }

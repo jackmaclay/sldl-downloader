@@ -64,7 +64,7 @@ h1 { font-size:22px; font-weight:700; letter-spacing:-.01em; margin:0 0 14px; }
 .btn.primary:hover { filter:brightness(1.08); }
 .btn:disabled { opacity:.5; }
 .bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; }
-.note { color:var(--mute); font-size:12px; } .note.err { color:var(--red); } .note.ok { color:var(--green); }
+.note { color:var(--mute); font-size:12px; } .note.err { color:var(--red); } .note.ok { color:var(--green); } .note.warn { color:var(--amber, #d98c1f); line-height:1.5; margin:6px 0 0; }
 .dim { color:var(--mute); }
 
 /* chunky pixel progress: 40 blocks */

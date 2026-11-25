@@ -1,0 +1,9 @@
+# CLAUDE.md
+
+Electron Mac app plus CLI. Shared code is in `src/`; `main.js` and `cli.js` are thin.
+
+- Renderer is sandboxed with context isolation and a CSP. It reaches Node only through `preload.js`; add an `ipcMain.handle` in `main.js` and a line in `preload.js` for anything new. No inline `style=`.
+- `~/.config/sldl/sldl.conf` holds the Soulseek password. Never print, log or commit it. Tests use `SLDL_CONF` and a fake sldl via `SLDL_BIN`.
+- `src/devices.js` is read-only. `src/ipod.js` + `tools/ipod_add.py` are the only code that writes to an iPod (pygpod in `~/.config/sldl/venv`, set up by `sldl-dl ipod-setup`). Back up `iPod_Control/iTunes` and `Device` before testing writes, and ask Jack before any new kind of write.
+- Design follows the Invoice app (`../invoice-generator`): glass sidebar, grouped rows, amber accent from the logo. Check UI with `npx electron test/shot.js <dir>`.
+- Spotify and Soulseek credentials are not set on this Mac since the logic board wipe, so real downloads are untested.

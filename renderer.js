@@ -1,358 +1,157 @@
-const { ipcRenderer } = require('electron');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+'use strict';
+const $ = (id) => document.getElementById(id);
+const BLOCKS = 40;
+const blocksEl = $('blocks');
+for (let i = 0; i < BLOCKS; i++) blocksEl.appendChild(document.createElement('i'));
 
-const CONFIG_PATH = path.join(os.homedir(), '.config', 'sldl', 'sldl.conf');
+const TITLES = { download: 'Download', player: 'Player', settings: 'Settings' };
+function show(page) {
+  document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === `page-${page}`));
+  document.querySelectorAll('.nav').forEach((n) => n.classList.toggle('on', n.dataset.page === page));
+  $('title').textContent = TITLES[page];
+  if (page === 'player') loadDevices();
+  if (page === 'settings') loadSettings();
+}
+document.querySelectorAll('.nav').forEach((n) => n.addEventListener('click', () => show(n.dataset.page)));
+$('chip').addEventListener('click', () => show('player'));
 
-let totalTracks = 0;
-let completedTracks = 0;
+const text = (tag, cls, str) => { const e = document.createElement(tag); if (cls) e.className = cls; e.textContent = str; return e; };
 
-// Theme toggle
-function toggleTheme() {
-    const body = document.body;
-    const toggle = document.getElementById('theme-toggle');
-    
-    body.classList.toggle('dark');
-    body.classList.toggle('light');
-    toggle.classList.toggle('active');
-    
-    // Save preference
-    const isDark = body.classList.contains('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+/* ---------- download ---------- */
+let state = { total: 0, done: 0, failed: 0, folder: null, dest: null };
+
+function paint(frac, fail) {
+  const on = Math.round(Math.max(0, Math.min(1, frac)) * BLOCKS);
+  [...blocksEl.children].forEach((b, i) => b.classList.toggle('on', i < on));
+  blocksEl.classList.toggle('fail', !!fail);
+}
+function resetRun() {
+  $('run').hidden = false;
+  state = { ...state, total: 0, done: 0, failed: 0, folder: null };
+  paint(0); $('tracks').replaceChildren(text('div', 'empty', 'Searching...')); $('log').textContent = '';
+  $('stat-main').textContent = 'Starting...'; $('stat-count').textContent = ''; $('send-card').hidden = true;
+}
+function addTrack(name, fail) {
+  const box = $('tracks'); if (box.firstChild && box.firstChild.className === 'empty') box.replaceChildren();
+  const row = text('div', fail ? 'trk fail' : 'trk', ''); row.append(text('span', 't', name), text('span', 'dim', fail ? 'not found' : 'done'));
+  box.appendChild(row); box.scrollTop = box.scrollHeight;
 }
 
-// Load theme preference on startup
-const savedTheme = localStorage.getItem('theme') || 'dark';
-if (savedTheme === 'light') {
-    document.body.classList.remove('dark');
-    document.body.classList.add('light');
-}
-
-// Check if settings exist on startup
-window.addEventListener('DOMContentLoaded', () => {
-    // Update theme toggle state
-    const toggle = document.getElementById('theme-toggle');
-    if (savedTheme === 'light') {
-        toggle.classList.remove('active');
-    }
-    
-    if (!fs.existsSync(CONFIG_PATH)) {
-        switchTab('settings', true);
-    } else {
-        loadSettings();
-    }
-    
-    // Load iPod mode preference
-    const ipodMode = localStorage.getItem('ipodMode') === 'true';
-    document.getElementById('ipod-mode').checked = ipodMode;
-    
-    const savedPlaylistName = localStorage.getItem('playlistName') || '';
-    document.getElementById('playlist-name').value = savedPlaylistName;
+window.api.onEvent((e) => {
+  if (e.type === 'line') { const log = $('log'); log.textContent += e.line + '\n'; log.scrollTop = log.scrollHeight; return; }
+  if (e.type === 'total') { state.total = e.total; $('stat-main').textContent = `Found ${e.total} tracks`; }
+  if (e.type === 'searching') $('stat-main').textContent = `Searching: ${e.track}`;
+  if (e.type === 'progress') $('stat-main').textContent = `Downloading: ${e.track}`;
+  if (e.type === 'done') { state.done = e.counts.done; addTrack(e.track, false); }
+  if (e.type === 'failed') { state.failed = e.counts.failed; addTrack(e.track, true); }
+  if (e.type === 'copy') { $('send-note').className = 'note'; $('send-note').textContent = `Copying ${e.done}/${e.total}`; }
+  if (['done', 'failed', 'total'].includes(e.type) && state.total) {
+    paint((state.done + state.failed) / state.total);
+    $('stat-count').textContent = `${state.done} of ${state.total}${state.failed ? `, ${state.failed} not found` : ''}`;
+  }
 });
 
-// Save iPod preferences when changed
-document.addEventListener('DOMContentLoaded', () => {
-    const ipodCheckbox = document.getElementById('ipod-mode');
-    const playlistNameInput = document.getElementById('playlist-name');
-    
-    ipodCheckbox.addEventListener('change', (e) => {
-        localStorage.setItem('ipodMode', e.target.checked);
-    });
-    
-    playlistNameInput.addEventListener('blur', (e) => {
-        localStorage.setItem('playlistName', e.target.value);
-    });
+$('start').addEventListener('click', async () => {
+  const input = $('url').value.trim();
+  if (!input) { setStatus('Paste a Spotify playlist URL first.', 'err'); return; }
+  resetRun(); setStatus('');
+  $('start').disabled = true; $('cancel').hidden = false;
+  try {
+    const r = await window.api.startDownload({ input, format: $('format').value, name: $('name').value.trim() });
+    if (!r.ok) throw new Error(`sldl stopped with code ${r.code}. Check your Soulseek login in Settings.`);
+    paint(r.total ? (r.done + r.failed) / r.total : 1, r.failed && !r.done);
+    $('stat-main').textContent = r.done ? 'Finished' : 'Finished, nothing downloaded';
+    state.folder = r.folder;
+    setStatus(r.folder ? `${r.done} downloaded${r.failed ? `, ${r.failed} not found` : ''}.` : 'No folder was created.', r.done ? 'ok' : 'err');
+    $('send-card').hidden = !(r.folder && r.tracks.length);
+    if (!$('send-card').hidden) syncRouteUi();
+  } catch (err) {
+    $('stat-main').textContent = 'Stopped'; setStatus(clean(err), 'err'); paint(state.total ? (state.done + state.failed) / state.total : 0, true);
+  } finally { $('start').disabled = false; $('cancel').hidden = true; }
+});
+$('cancel').addEventListener('click', () => window.api.cancelDownload());
+function setStatus(msg, kind) { const n = $('status'); n.textContent = msg; n.className = 'note' + (kind ? ' ' + kind : ''); }
+const clean = (err) => String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
+/* ---------- send ---------- */
+function syncRouteUi() {
+  const copy = $('route').value === 'copy';
+  $('dest-row').hidden = !copy; $('layout-row').hidden = !copy;
+}
+$('route').addEventListener('change', syncRouteUi);
+$('pick-dest').addEventListener('click', async () => {
+  const p = await window.api.pickFolder(); if (!p) return;
+  state.dest = p; $('pick-dest').textContent = p.split('/').slice(-2).join('/');
+});
+$('reveal').addEventListener('click', () => state.folder && window.api.reveal(state.folder));
+$('send').addEventListener('click', async () => {
+  const note = $('send-note'); note.className = 'note'; note.textContent = '';
+  const route = $('route').value;
+  if (route === 'copy' && !state.dest) { note.className = 'note err'; note.textContent = 'Choose a destination first.'; return; }
+  $('send').disabled = true;
+  try {
+    if (route === 'ipod' && !(await window.api.ipodReady())) {
+      note.textContent = 'Installing the iPod helper (one-off, needs internet)...';
+      await window.api.ipodSetup(); note.textContent = '';
+    }
+    const r = await window.api.send({ folder: state.folder, route, dest: state.dest, name: $('name').value.trim() || undefined, layout: $('layout').value });
+    note.className = 'note ok';
+    note.textContent = route === 'ipod' ? `iPod updated: ${r.added} added, ${r.skipped} already there. Eject it before unplugging.` : route === 'music' ? `Added ${r.added} of ${r.of} tracks to Music.` : `Copied ${r.copied} files.`;
+  } catch (err) { note.className = 'note err'; note.textContent = clean(err); }
+  finally { $('send').disabled = false; }
 });
 
-// Select folder dialog
-function selectFolder() {
-    console.log('selectFolder called');
-    ipcRenderer.send('select-folder');
-}
-
-// Listen for selected folder
-ipcRenderer.on('selected-folder', (event, folderPath) => {
-    console.log('Folder selected:', folderPath);
-    if (folderPath) {
-        document.getElementById('download-path').value = folderPath;
-        document.getElementById('current-path').textContent = `Selected: ${folderPath}`;
+/* ---------- player ---------- */
+const STATUS = { ready: 'Ready', 'disk-mode': 'Disk mode, no library', recovery: 'Recovery mode' };
+const EXPLAIN = {
+  'disk-mode': 'The iPod shows up as a plain drive and its own software is not running. A restore from Music or Finder normally fixes this. If restores fail, the flash is usually damaged and no app can write music the iPod will play.',
+  recovery: 'The iPod is in DFU or recovery mode, so its firmware is not running. Restore it from Music or Finder.',
+};
+async function loadDevices() {
+  const box = $('devices'); box.replaceChildren(text('div', 'empty-dev', 'Looking...'));
+  const [list, music] = await Promise.all([window.api.devices(), window.api.musicSources()]);
+  box.replaceChildren();
+  if (!list.length) box.appendChild(text('div', 'empty-dev', 'No iPod found. Plug it in and press Refresh.'));
+  for (const d of list) {
+    const card = text('div', 'dev', ''); const h = text('h2', '', d.model);
+    const dot = text('span', `dot ${d.status}`, ''); h.prepend(dot);
+    card.append(h, text('div', 'sub', `${STATUS[d.status] || d.status}${d.serial ? `  ·  ${d.serial}` : ''}`));
+    if (d.volume) {
+      const gb = (n) => (n / 1e9).toFixed(1);
+      card.append(text('div', '', `${d.volume.mount}  ·  ${gb(d.volume.free)} GB free of ${gb(d.volume.total)} GB`));
+      if (d.volume.flags.length) { const ul = document.createElement('ul'); d.volume.flags.forEach((f) => ul.appendChild(text('li', 'warn', f))); card.appendChild(ul); }
     }
+    if (EXPLAIN[d.status]) card.appendChild(text('div', 'explain', EXPLAIN[d.status]));
+    box.appendChild(card);
+  }
+  $('music-note').textContent = music.ok
+    ? `Music app sees: ${music.sources.join(', ')}${music.sources.some((s) => /ipod/i.test(s)) ? '' : ' (no iPod)'}`
+    : 'Music app could not be queried.';
+  updateChip(list);
+}
+$('refresh').addEventListener('click', loadDevices);
+function updateChip(list) {
+  const d = list[0];
+  $('chip-dot').className = `dot ${d ? d.status : ''}`;
+  $('chip-text').textContent = d ? `${d.model}, ${STATUS[d.status] || d.status}` : 'No player';
+}
+window.api.devices().then(updateChip).catch(() => {});
+setInterval(() => window.api.devices().then(updateChip).catch(() => {}), 15000);
+
+/* ---------- settings ---------- */
+async function loadSettings() {
+  const c = await window.api.getSettings();
+  $('s-user').value = c.user || ''; $('s-pass').value = c.pass || '';
+  $('s-path').textContent = c.path || 'Not set'; $('s-format').value = c['pref-format'] || 'mp3';
+  $('s-namefmt').value = c['name-format'] || ''; $('s-note').textContent = '';
+}
+$('s-path-btn').addEventListener('click', async () => { const p = await window.api.pickFolder(); if (p) $('s-path').textContent = p; });
+$('s-save').addEventListener('click', async () => {
+  const path = $('s-path').textContent;
+  await window.api.saveSettings({
+    user: $('s-user').value, pass: $('s-pass').value, path: path === 'Not set' ? '' : path,
+    'pref-format': $('s-format').value, 'name-format': $('s-namefmt').value,
+  });
+  $('s-note').className = 'note ok'; $('s-note').textContent = 'Saved.';
 });
-
-// Toggle progress details
-function toggleDetails() {
-    const toggle = document.getElementById('details-toggle');
-    const details = document.getElementById('progress-details');
-    
-    toggle.classList.toggle('open');
-    details.classList.toggle('open');
-    
-    if (details.classList.contains('open')) {
-        toggle.textContent = 'Hide details';
-    } else {
-        toggle.textContent = 'Show details';
-    }
-}
-
-// Tab switching
-function switchTab(tabName, skipEvent = false) {
-    console.log('Switching to tab:', tabName);
-    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    
-    const tabs = document.querySelectorAll('.tab');
-    tabs.forEach((tab, index) => {
-        const expectedTab = index === 0 ? 'download' : 'settings';
-        if (expectedTab === tabName) {
-            tab.classList.add('active');
-        }
-    });
-    
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-    
-    if (tabName === 'settings') {
-        loadSettings();
-    }
-}
-
-// Load settings from config file
-function loadSettings() {
-    try {
-        if (fs.existsSync(CONFIG_PATH)) {
-            const config = fs.readFileSync(CONFIG_PATH, 'utf8');
-            const lines = config.split('\n');
-            
-            lines.forEach(line => {
-                const [key, ...valueParts] = line.split('=');
-                const value = valueParts.join('=').trim();
-                
-                if (key.trim() === 'user') {
-                    document.getElementById('username').value = value;
-                }
-                if (key.trim() === 'pass') {
-                    document.getElementById('password').value = value;
-                }
-                if (key.trim() === 'path') {
-                    document.getElementById('download-path').value = value;
-                    document.getElementById('current-path').textContent = `Current: ${value}`;
-                }
-                if (key.trim() === 'pref-format') {
-                    document.getElementById('audio-format').value = value;
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Error loading settings:', error);
-    }
-}
-
-// Save settings to config file
-function saveSettings() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const downloadPath = document.getElementById('download-path').value;
-    const audioFormat = document.getElementById('audio-format').value;
-    
-    if (!username || !password || !downloadPath) {
-        showStatus('settings-status', 'Please fill in all fields', 'error');
-        return;
-    }
-    
-    const config = `user = ${username}
-pass = ${password}
-path = ${downloadPath}
-name-format = {artist} - {title}
-pref-format = ${audioFormat}`;
-    
-    try {
-        const configDir = path.dirname(CONFIG_PATH);
-        if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-        }
-        
-        fs.writeFileSync(CONFIG_PATH, config, 'utf8');
-        showStatus('settings-status', '✓ Settings saved successfully!', 'success');
-        
-        // Create download folder if it doesn't exist
-        if (!fs.existsSync(downloadPath)) {
-            fs.mkdirSync(downloadPath, { recursive: true });
-        }
-    } catch (error) {
-        showStatus('settings-status', `Error saving settings: ${error.message}`, 'error');
-    }
-}
-
-// Start download
-async function startDownload() {
-    const url = document.getElementById('playlist-url').value.trim();
-    const ipodMode = document.getElementById('ipod-mode').checked;
-    const playlistName = document.getElementById('playlist-name').value.trim();
-    
-    if (!url) {
-        showStatus('status', 'Please enter a Spotify playlist URL', 'error');
-        return;
-    }
-    
-    if (!url.includes('spotify.com')) {
-        showStatus('status', 'Please enter a valid Spotify URL', 'error');
-        return;
-    }
-    
-    // Check if settings exist
-    if (!fs.existsSync(CONFIG_PATH)) {
-        showStatus('status', 'Please configure your settings first', 'error');
-        setTimeout(() => switchTab('settings', true), 2000);
-        return;
-    }
-    
-    // Check macOS for iPod mode
-    if (ipodMode && process.platform !== 'darwin') {
-        showStatus('status', '⚠ iPod Companion Mode only works on macOS', 'error');
-        return;
-    }
-    
-    const downloadBtn = document.getElementById('download-btn');
-    const progressContainer = document.getElementById('progress-container');
-    const progressText = document.getElementById('progress-text');
-    const progressBar = document.getElementById('progress-bar');
-    const progressStatus = document.getElementById('progress-status');
-    
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = ipodMode ? 'Downloading & Syncing...' : 'Downloading...';
-    progressContainer.classList.add('active');
-    progressContainer.classList.remove('complete');
-    progressText.textContent = '';
-    progressBar.style.width = '0%';
-    progressStatus.textContent = ipodMode ? 'Starting download with iPod sync...' : 'Starting download...';
-    document.getElementById('status').style.display = 'none';
-    
-    // Reset counters
-    totalTracks = 0;
-    completedTracks = 0;
-    
-    // Send download command with iPod mode settings
-    ipcRenderer.send('start-download', { 
-        url, 
-        ipodMode,
-        playlistName 
-    });
-}
-
-// Listen for download progress
-ipcRenderer.on('download-progress', (event, data) => {
-    const progressText = document.getElementById('progress-text');
-    const progressBar = document.getElementById('progress-bar');
-    const progressStatus = document.getElementById('progress-status');
-    
-    progressText.textContent += data + '\n';
-    progressText.scrollTop = progressText.scrollHeight;
-    
-    // Parse progress from output
-    if (data.includes('Downloading') && data.includes('tracks:')) {
-        const match = data.match(/Downloading (\d+) tracks:/);
-        if (match) {
-            totalTracks = parseInt(match[1]);
-            progressStatus.textContent = `Found ${totalTracks} tracks to download...`;
-            progressBar.style.width = '5%';
-        }
-    }
-    
-    // Track searching progress
-    if (data.includes('Searching:')) {
-        const searchingCount = (data.match(/Searching:/g) || []).length;
-        if (totalTracks > 0) {
-            const searchProgress = Math.min(30, (searchingCount / totalTracks) * 30);
-            progressBar.style.width = searchProgress + '%';
-            progressStatus.textContent = `Searching for tracks... (${searchingCount}/${totalTracks})`;
-        }
-    }
-    
-    // Track download progress
-    if (data.includes('InProgress:')) {
-        if (totalTracks > 0) {
-            const downloadProgress = 30 + ((completedTracks / totalTracks) * 40);
-            progressBar.style.width = downloadProgress + '%';
-            progressStatus.textContent = `Downloading... ${completedTracks}/${totalTracks} completed`;
-        }
-    }
-    
-    if (data.includes('Succeeded:')) {
-        completedTracks++;
-        if (totalTracks > 0) {
-            const percentage = 30 + ((completedTracks / totalTracks) * 40);
-            progressBar.style.width = percentage + '%';
-            progressStatus.textContent = `Downloaded ${completedTracks} of ${totalTracks} tracks (${Math.round((completedTracks/totalTracks)*100)}%)`;
-        }
-    }
-    
-    // Organizing files
-    if (data.includes('--- Organizing files ---')) {
-        progressBar.style.width = '75%';
-        progressStatus.textContent = 'Organizing files...';
-    }
-    
-    // iTunes integration
-    if (data.includes('--- Adding to iTunes/Music ---')) {
-        progressBar.style.width = '80%';
-        progressStatus.textContent = 'Adding to iTunes/Music...';
-    }
-    
-    if (data.includes('Creating playlist:')) {
-        progressBar.style.width = '85%';
-    }
-    
-    if (data.includes('--- Syncing to iPod ---')) {
-        progressBar.style.width = '90%';
-        progressStatus.textContent = 'Syncing to iPod...';
-    }
-    
-    if (data.includes('Sync started!')) {
-        progressBar.style.width = '95%';
-    }
-});
-
-// Listen for download complete
-ipcRenderer.on('download-complete', (event, success) => {
-    const downloadBtn = document.getElementById('download-btn');
-    const progressBar = document.getElementById('progress-bar');
-    const progressStatus = document.getElementById('progress-status');
-    const progressContainer = document.getElementById('progress-container');
-    const ipodMode = document.getElementById('ipod-mode').checked;
-    
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = 'Start Download';
-    
-    if (success) {
-        progressBar.style.width = '100%';
-        
-        if (ipodMode) {
-            progressStatus.textContent = '🎉 Download complete! Check iTunes/Music for sync status.';
-            showStatus('status', `✓ Successfully synced ${completedTracks} track${completedTracks !== 1 ? 's' : ''} to iPod!`, 'success');
-        } else {
-            progressStatus.textContent = '🎉 Download completed successfully!';
-            showStatus('status', `✓ Successfully downloaded ${completedTracks} track${completedTracks !== 1 ? 's' : ''}!`, 'success');
-        }
-        
-        // Add success animation
-        progressContainer.classList.add('complete');
-        setTimeout(() => {
-            progressContainer.classList.remove('complete');
-        }, 3000);
-    } else {
-        showStatus('status', '✗ Download failed. Check the details above.', 'error');
-    }
-});
-
-// Show status message
-function showStatus(elementId, message, type) {
-    const statusEl = document.getElementById(elementId);
-    statusEl.textContent = message;
-    statusEl.className = `status ${type}`;
-    
-    if (type === 'success') {
-        setTimeout(() => {
-            statusEl.style.display = 'none';
-        }, 5000);
-    }
-}
+$('slsk-link').addEventListener('click', () => window.api.openExternal('https://www.slsknet.org/'));

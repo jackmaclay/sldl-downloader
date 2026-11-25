@@ -1,13 +1,16 @@
 {
   "name": "sldl-downloader",
   "productName": "SLDL Downloader",
-  "version": "2.0.0",
-  "description": "Download Spotify playlists via Soulseek with automatic iPod sync",
+  "version": "3.0.0",
+  "description": "Download Spotify playlists via Soulseek and put them on a player",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --mac",
-    "build-all": "electron-builder --mac --win --linux"
+    "build-all": "electron-builder --mac --win --linux",
+    "test": "node --test test/core.test.js",
+    "shot": "electron test/shot.js",
+    "cli": "node cli.js"
   },
   "author": "Jack M",
   "license": "MIT",
@@ -15,13 +18,17 @@
     "appId": "com.jackm.sldl-downloader",
     "files": [
       "**/*",
-      "!resources/sldl"
+      "!resources/sldl",
+      "!test/**",
+      "!dist/**"
     ],
     "extraResources": [
       {
         "from": "resources/sldl",
         "to": "sldl",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
@@ -31,10 +38,8 @@
         "zip"
       ],
       "icon": "build/icon.icns",
-      "hardenedRuntime": false,
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "This app needs to control iTunes/Music to add songs and sync your iPod.",
-        "NSSystemAdministrationUsageDescription": "This app needs automation permissions to control iTunes/Music."
+        "NSAppleEventsUsageDescription": "SLDL Downloader adds your downloaded playlists to the Music app."
       }
     },
     "dmg": {
@@ -53,5 +58,8 @@
   "devDependencies": {
     "electron": "^39.2.3",
     "electron-builder": "^26.0.12"
+  },
+  "bin": {
+    "sldl-dl": "cli.js"
   }
 }

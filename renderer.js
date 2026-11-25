@@ -13,8 +13,9 @@ function show(page) {
   if (page === 'settings') loadSettings();
 }
 document.querySelectorAll('.nav').forEach((n) => n.addEventListener('click', () => show(n.dataset.page)));
-$('chip').addEventListener('click', () => show('player'));
 
+// Eject a mounted iPod, or reconnect an ejected one (no unplugging). Used by the sidebar and the Player page.
+async function ipodToggle(d) { return d.volume ? window.api.ipodEject({ serial: d.serial }) : window.api.ipodReconnect({ serial: d.serial }); }
 const text = (tag, cls, str) => { const e = document.createElement(tag); if (cls) e.className = cls; e.textContent = str; return e; };
 
 /* ---------- download ---------- */
@@ -247,7 +248,7 @@ async function loadDevices() {
       const b = text('button', 'btn', d.volume ? 'Eject' : 'Reconnect');
       b.addEventListener('click', async () => {
         b.disabled = true; b.textContent = d.volume ? 'Ejecting...' : 'Reconnecting...';
-        try { await (d.volume ? window.api.ipodEject({ serial: d.serial }) : window.api.ipodReconnect({ serial: d.serial })); $('music-note').textContent = ''; }
+        try { await ipodToggle(d); $('music-note').textContent = ''; }
         catch (err) { $('music-note').textContent = clean(err); }
         loadDevices();
       });
@@ -262,9 +263,26 @@ async function loadDevices() {
 }
 $('refresh').addEventListener('click', loadDevices);
 function updateChip(list) {
-  const d = list[0];
-  $('chip-dot').className = `dot ${d ? d.status : ''}`;
-  $('chip-text').textContent = d ? `${d.model}, ${STATUS[d.status] || d.status}` : 'No player';
+  const box = $('chips'); box.replaceChildren();
+  if (!list.length) { const row = text('div', 'chip', ''); row.append(text('span', 'dot', ''), text('span', 'chip-text', 'No player')); box.appendChild(row); return; }
+  for (const d of list) {
+    const row = text('div', 'chip', '');
+    const name = text('button', 'chip-text', d.model.replace(/^iPod /, ''));
+    name.title = `${STATUS[d.status] || d.status}. Open the Player page`; name.addEventListener('click', () => show('player'));
+    row.append(text('span', `dot ${d.status}`, ''), name);
+    if (d.status !== 'recovery') {
+      const act = text('button', 'chip-act', d.volume ? 'Eject' : 'Reconnect');
+      act.addEventListener('click', async () => {
+        act.disabled = true; act.textContent = d.volume ? 'Ejecting...' : 'Reconnecting...';
+        try { await ipodToggle(d); } catch (err) { name.textContent = clean(err).slice(0, 60); }
+        window.api.devices().then(updateChip).catch(() => {});
+        if (!$('page-player').classList.contains('on')) return;
+        loadDevices();
+      });
+      row.appendChild(act);
+    }
+    box.appendChild(row);
+  }
 }
 window.api.devices().then(updateChip).catch(() => {});
 setInterval(() => window.api.devices().then(updateChip).catch(() => {}), 15000);

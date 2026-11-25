@@ -134,3 +134,14 @@ test('inspectVolume reads the FireWire GUID from SysInfo', () => {
   fs.writeFileSync(path.join(v, 'iPod_Control', 'Device', 'SysInfo'), 'FirewireGuid: 0x2222222222222222\n');
   assert.strictEqual(devices.inspectVolume(v).guid, '2222222222222222');
 });
+
+test('guard: no real device serials, Apple IDs or team ids in tracked files (the repo is public)', () => {
+  const { execFileSync } = require('child_process');
+  const root = path.join(__dirname, '..');
+  let files; try { files = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean); } catch { return; }
+  // Apple FireWire GUIDs start with the 000A27 vendor prefix; also the signing team and Apple ID.
+  const bad = /000A27[0-9A-F]{10}|TEAMID-REDACTED|apple-id-redacted|YM8[0-9A-Z]{9}/i;
+  const hits = files.filter((f) => !/\.(png|icns|ico|webp|jpg)$/i.test(f) && f !== 'package-lock.json' && !f.startsWith('resources/'))
+    .filter((f) => { try { return bad.test(fs.readFileSync(path.join(root, f), 'utf8')); } catch { return false; } });
+  assert.deepStrictEqual(hits, []);
+});

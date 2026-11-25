@@ -60,7 +60,9 @@ function inspectVolume(mount) {
   return { mount, sysInfoBytes: sysInfo, hasDb, free, total, flags, guid };
 }
 
-// One call for the UI and CLI. status: none | recovery | disk-mode | ready
+// One call for the UI and CLI. status: recovery | unmounted | disk-mode | ready
+//   unmounted: on USB but no volume mounted (ejected, or not mounted yet). Not a fault.
+//   disk-mode: a volume is mounted but has no library database (what a bricked iPod looks like).
 async function list(opts = {}) {
   const sp = opts.profile || (await run('/usr/sbin/system_profiler', ['SPUSBHostDataType', '-json'])).stdout;
   let usb = [];
@@ -87,10 +89,11 @@ async function list(opts = {}) {
       model: MODELS[u.pid] || recovery || 'iPod',
       usbId: '0x' + u.pid.toString(16),
       serial: u.serial,
-      status: recovery ? 'recovery' : vol ? (vol.hasDb ? 'ready' : 'disk-mode') : 'disk-mode',
+      status: recovery ? 'recovery' : vol ? (vol.hasDb ? 'ready' : 'disk-mode') : 'unmounted',
       volume: vol,
       notes: recovery ? ['The iPod is in recovery/DFU: its own firmware is not running.']
-        : vol && !vol.hasDb ? ['Mounted as a plain disk with no library database. A bricked iPod looks like this.'] : [],
+        : !vol ? ['On USB but not mounted. It was probably ejected: unplug it and plug it back in.']
+        : !vol.hasDb ? ['Mounted as a plain disk with no library database. A bricked iPod looks like this.'] : [],
     });
   }
   for (const m of mounts) devices.push({ model: 'iPod (volume only)', usbId: '', serial: '', status: m.hasDb ? 'ready' : 'disk-mode', volume: m, notes: [] });

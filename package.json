@@ -1,7 +1,7 @@
 {
   "name": "sldl-downloader",
   "productName": "SLDL Downloader",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Download Spotify playlists via Soulseek and put them on a player",
   "main": "main.js",
   "scripts": {

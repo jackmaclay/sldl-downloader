@@ -125,6 +125,7 @@ test('devices.list pairs a volume with its own iPod by GUID, not by order', asyn
   const list = await devices.list({ profile, mounts: [vol] });
   const classic = list.find((d) => d.usbId === '0x1261'); const nano = list.find((d) => d.usbId === '0x1263');
   assert.strictEqual(classic.volume, null);
+  assert.strictEqual(classic.status, 'unmounted'); // ejected, not a fault
   assert.strictEqual(nano.volume.mount, '/Volumes/iPod');
   assert.strictEqual(nano.status, 'ready');
 });

@@ -186,8 +186,9 @@ $('send').addEventListener('click', async () => {
 });
 
 /* ---------- player ---------- */
-const STATUS = { ready: 'Ready', 'disk-mode': 'Disk mode, no library', recovery: 'Recovery mode' };
+const STATUS = { ready: 'Ready', unmounted: 'Not mounted', 'disk-mode': 'Disk mode, no library', recovery: 'Recovery mode' };
 const EXPLAIN = {
+  unmounted: 'The iPod is connected but its disk is not mounted, usually because it was ejected. Nothing is wrong. Unplug it and plug it back in.',
   'disk-mode': 'The iPod shows up as a plain drive and its own software is not running. A restore from Music or Finder normally fixes this. If restores fail, the flash is usually damaged and no app can write music the iPod will play.',
   recovery: 'The iPod is in DFU or recovery mode, so its firmware is not running. Restore it from Music or Finder.',
 };

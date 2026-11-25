@@ -11,6 +11,7 @@ const spotify = require('./src/spotify');
 const prefs = require('./src/prefs');
 const plan = require('./src/plan');
 const dedupe = require('./src/dedupe');
+const known = require('./src/known');
 const os = require('os');
 
 const HELP = `sldl-dl: download Spotify playlists from Soulseek and put them on a player
@@ -24,6 +25,7 @@ Usage
   space limit (default 14.5 GB, or --limit-gb). If it does not fit, nothing is downloaded: it lists
   the playlists and sizes, and you choose with --playlists 1,3. A pick that is over the limit is refused.
   sldl-dl devices                 list connected iPods and their state
+  sldl-dl scan [classic|nano]      mount an iPod, save the list of songs on it, eject (writes nothing); downloads then skip songs it has
   sldl-dl eject [classic|nano]     eject a mounted iPod (it stays on USB)
   sldl-dl reconnect [classic|nano] mount an ejected iPod again without unplugging it
   sldl-dl send <folder> [--ipod | --music | --to DEST] [--name NAME] [--layout rockbox|flat]
@@ -74,7 +76,7 @@ async function flushIpod() {
     for (const p of pendingIpod) {
       out.info(`--- ${p.name}: ${p.tracks.length} tracks`);
       last = await ipod.addToIpod({
-        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: p.name, files: p.tracks,
+        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: p.name, files: p.tracks, folder: p.folder,
         onEvent: (e) => { if (e.type === 'track') out.info(`[${e.n}/${e.of}] ${e.status}: ${e.file}${e.msg ? ' (' + e.msg + ')' : ''}`, e); },
       });
     }
@@ -85,7 +87,7 @@ async function flushIpod() {
 }
 
 async function deliver(out, flags, folder, tracks, name) {
-  if (flags.ipod) pendingIpod.push({ name, tracks });
+  if (flags.ipod) pendingIpod.push({ name, tracks, folder });
   if (flags.music) {
     out.info('Adding to Music.app...');
     const r = await sync.addToMusic(name, tracks);
@@ -112,18 +114,24 @@ async function runPlanned(out, flags, pls) {
   const p = prefs.read();
   const fmt = String(flags.format || p.defaultFormat || 'mp3').toLowerCase() === 'flac' ? 'flac' : 'mp3';
   const only = flags.only; const save = only ? false : (flags['no-library'] ? false : p.saveToLibrary);
-  const index = await dedupe.buildIndex([conf.read().path, p.libraryDir, path.join(os.homedir(), 'Music', 'Lily')]);
+  // Which iPod is this for? Its stored song list lets us skip songs it already has without mounting it.
+  let catalog = null; let dev = null;
+  if (flags.ipod || flags.device) { try { dev = ipod.resolveDevice(await devices.list(), flags.device); catalog = known.loadCatalog(dev.serial); } catch { /* chosen at upload time */ } }
+  if (dev && !catalog) out.info(`No song list for ${dev.model} yet. Run \`sldl-dl scan ${dev.model.replace(/^iPod /, '').split(' ')[0].toLowerCase()}\` so downloads can skip songs it already has.`);
+  if (catalog) out.info(`Using ${dev.model}'s song list (${catalog.tracks.length} songs): songs it has are linked, not downloaded.`);
+  const index = await dedupe.buildIndex([conf.read().path, p.libraryDir, path.join(os.homedir(), 'Music', 'Lily')], { catalog });
   for (const pl of pls) {
     out.info(`--- ${pl.name}`);
     const ev = plan.runPlaylist({ name: flags.name && pls.length === 1 ? flags.name : pl.name, items: pl.items.map((i) => ({ ...i, format: fmt })), saveToLibrary: save, only, index });
     ev.on('total', (e) => out.info(`Found ${e.total} tracks to download`, { type: 'total', total: e.total }));
     ev.on('reused', (e) => out.info(`Already have: ${e.track}`, { type: 'reused', track: e.track }));
+    ev.on('onipod', (e) => out.info(`Already on the iPod: ${e.track}`, { type: 'onipod', track: e.track }));
     ev.on('done', (e, c) => out.info(`[${c.done}/${c.total}] ${e.track}`, { type: 'track', track: e.track, ...c }));
     ev.on('failed', (e) => out.info(`Failed: ${e.track}`, { type: 'failed', track: e.track }));
     const r = await ev.done;
-    out.info(`Done: ${r.done} downloaded, ${r.reused} already had, ${r.failed} not found. Folder: ${r.folder || '(none)'}`, { type: 'finished', ...r });
+    out.info(`Done: ${r.done} downloaded, ${r.reused} already had, ${r.onIpod} already on the iPod, ${r.failed} not found. Folder: ${r.folder || '(none)'}`, { type: 'finished', ...r });
     for (const n of r.notes) out.info(`Note: ${n}`);
-    if (r.folder) await deliver(out, flags, r.folder, r.tracks, pl.name);
+    if (r.folder && (r.tracks.length || r.onIpod)) await deliver(out, flags, r.folder, r.tracks, pl.name);
   }
 }
 
@@ -182,6 +190,14 @@ async function main() {
     if (!folder) throw new Error('Give the playlist folder.');
     const tracks = sldl.listTracks(folder);
     return deliver(out, flags, folder, tracks, flags.name || path.basename(path.resolve(folder)));
+  }
+
+  if (cmd === 'scan') {
+    const dev = ipod.resolveDevice(await devices.list(), pos[0]);
+    out.info(`${dev.model}: mounting to read its songs (nothing is written)...`);
+    await ipod.scan(dev.serial);
+    const c = known.loadCatalog(dev.serial); out.info(`${dev.model}: ${c ? c.tracks.length : 0} songs saved. It is ejected again.`);
+    return;
   }
 
   if (cmd === 'eject' || cmd === 'reconnect') {

@@ -48,8 +48,13 @@ function walk(dir, out = []) {
 // Index of every song in `dirs`. opts.tags=false uses file names only (fast, for tests).
 async function buildIndex(dirs, opts = {}) {
   const map = new Map(); // key -> [{ file, lossless }]
+  const ipodKeys = new Set(); // songs the chosen iPod had when it was last mounted
+  if (opts.catalog && opts.catalog.tracks) for (const t of opts.catalog.tracks) { const k = keyOf(t.title, t.artist); ipodKeys.add(k); }
   const index = {
     map,
+    // Is this song on the iPod (as of its stored song list)? An artist-less entry matches by title alone.
+    onIpod(title, artist) { const t = baseTitle(title); return !!t && (ipodKeys.has(`${t}|${words(artist)[0] || ''}`) || ipodKeys.has(`${t}|`)); },
+    ipodCount: () => ipodKeys.size,
     add(file, title, artist) {
       if (!baseTitle(title)) return;
       const k = keyOf(title, artist);

@@ -57,7 +57,7 @@ ipcMain.handle('dialog:folder', async () => {
 ipcMain.handle('devices:list', async () => {
   const list = await devices.list(); known.remember(list);
   const k = known.lastKnown();
-  return list.map((d) => ({ ...d, last: !d.volume && k[d.serial] ? k[d.serial] : null })); // last seen free space while ejected
+  return list.map((d) => { const c = known.loadCatalog(d.serial); return { ...d, last: !d.volume && k[d.serial] ? k[d.serial] : null, catalog: c ? { at: c.at, count: c.tracks.length } : null }; }); // last seen free space and song list while ejected
 });
 // How much room the connected player has (or a 16 GB iPod's worth when none is mounted).
 async function budgetInfo() {
@@ -82,29 +82,35 @@ ipcMain.handle('playlist:plan', async (_e, { input }) => {
 });
 // The folders searched for "do we already have this song": the iPod folder, the Mac library and Lily's folder.
 const indexDirs = () => [conf.read().path, prefs.read().libraryDir, path.join(os.homedir(), 'Music', 'Lily')];
-let batchIndex = null;
-// For the planner: which songs already exist on this Mac, and which repeat an earlier selected playlist.
-ipcMain.handle('existing:check', async (_e, { playlists }) => {
-  batchIndex = await dedupe.buildIndex(indexDirs());
+let batchIndex = null; let batchSerial = null;
+const buildBatchIndex = async (serial) => { batchSerial = serial || null; batchIndex = await dedupe.buildIndex(indexDirs(), { catalog: serial ? known.loadCatalog(serial) : null }); return batchIndex; };
+// For the planner: for each song, whether it is already on this Mac, already on the chosen iPod (from its stored song list), or repeats an
+// earlier selected playlist. Also says how fresh the iPod's song list is.
+ipcMain.handle('existing:check', async (_e, { playlists, serial }) => {
+  const ix = await buildBatchIndex(serial);
   const seen = new Set();
-  return playlists.map((items) => items.map((it) => {
+  const items = playlists.map((list) => list.map((it) => {
     const key = dedupe.keyOf(it.title, it.artist);
-    const have = !!batchIndex.find(it.title, it.artist) || seen.has(key); seen.add(key);
-    return have;
+    const have = !!ix.find(it.title, it.artist) || seen.has(key); seen.add(key);
+    return { have, ipod: !!(serial && ix.onIpod(it.title, it.artist)) };
   }));
+  const cat = serial ? known.loadCatalog(serial) : null;
+  return { items, catalog: cat ? { model: cat.model, at: cat.at, count: cat.tracks.length } : null };
 });
 // Download one planned playlist: songs we already have are reused, the rest are fetched (see src/plan.js).
-ipcMain.handle('download:run', async (_e, { name, items, saveToLibrary, first }) => {
+ipcMain.handle('download:run', async (_e, { name, items, saveToLibrary, first, serial }) => {
   if (job) throw new Error('A download is already running.');
-  if (first || !batchIndex) batchIndex = await dedupe.buildIndex(indexDirs());
+  if (first || !batchIndex || batchSerial !== (serial || null)) await buildBatchIndex(serial);
   const ev = plan.runPlaylist({ name, items, saveToLibrary, index: batchIndex });
   job = ev;
   ev.on('line', (line) => push({ type: 'line', line }));
-  for (const t of ['total', 'searching', 'progress', 'done', 'failed', 'reused']) ev.on(t, (e, counts) => push({ ...e, counts }));
+  for (const t of ['total', 'searching', 'progress', 'done', 'failed', 'reused', 'onipod']) ev.on(t, (e, counts) => push({ ...e, counts }));
   try { return await ev.done; } finally { job = null; }
 });
 let sending = 0; // a send to an iPod is in progress: do not eject or reset then
 ipcMain.handle('ipod:ready', () => ipod.ready());
+// Mount an iPod, refresh its stored song list, eject. Nothing is written.
+ipcMain.handle('ipod:scan', async (_e, { serial }) => { if (job || sending) throw new Error('Wait for the current download or send to finish.'); await ipod.scan(serial); const c = known.loadCatalog(serial); return { count: c ? c.tracks.length : 0 }; });
 ipcMain.handle('ipod:reconnect', async (_e, { serial }) => { if (job || sending) throw new Error('Wait for the current download or send to finish.'); const d = await ipod.reconnect(serial); return { model: d.model, mount: d.volume.mount }; });
 ipcMain.handle('ipod:eject', async (_e, { serial }) => {
   if (job || sending) throw new Error('Wait for the current download or send to finish.');
@@ -136,15 +142,15 @@ ipcMain.handle('send:run', async (_e, args) => { sending++; try { return await s
 async function sendIpod({ folder, folders, name, serial }) {
   const dev = ipod.resolveDevice(await devices.list(), serial);
   const list = folders && folders.length ? folders : [folder];
-  const sum = { added: 0, skipped: 0, total: 0 };
+  const sum = { added: 0, skipped: 0, linked: 0, missing: 0, total: 0 };
   const r = await ipod.withMounted(dev.serial, async (d) => {
     for (const f of list) {
       const tracks = sldl.listTracks(f);
       const res = await ipod.addToIpod({
-        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: (list.length === 1 && name) || path.basename(f), files: tracks,
+        mount: d.volume.mount, guid: ipod.guidOf(d.serial), playlist: (list.length === 1 && name) || path.basename(f), files: tracks, folder: f,
         onEvent: (e) => { if (e.type === 'track') push({ type: 'copy', done: e.n, total: e.of }); },
       });
-      sum.added += res.added; sum.skipped += res.skipped; sum.total = res.total;
+      sum.added += res.added; sum.skipped += res.skipped; sum.linked += res.linked || 0; sum.missing += res.missing || 0; sum.total = res.total;
     }
     return sum;
   }, { autoEject: prefs.read().autoEject });

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   runPlaylist: call('download:run'),
   ipodReady: call('ipod:ready'),
   ipodReconnect: call('ipod:reconnect'),
+  ipodScan: call('ipod:scan'),
   ipodEject: call('ipod:eject'),
   ipodSetup: call('ipod:setup'),
   musicSources: call('devices:music'),

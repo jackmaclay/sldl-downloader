@@ -16,4 +16,14 @@ function remember(list) {
   if (changed) { try { fs.mkdirSync(path.dirname(file()), { recursive: true }); fs.writeFileSync(file(), JSON.stringify(known, null, 1)); } catch { /* not critical */ } }
   return known;
 }
-module.exports = { remember, lastKnown };
+
+// What is on each iPod (title, artist, length, playlists), read the last time it was mounted. Lets the app skip downloading songs an
+// iPod already has without mounting it. One file per iPod, named by its serial.
+const dir = () => path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config', 'sldl'), 'catalogs');
+function saveCatalog(serial, model, tracks) {
+  fs.mkdirSync(dir(), { recursive: true });
+  fs.writeFileSync(path.join(dir(), `${String(serial).toUpperCase()}.json`), JSON.stringify({ model, at: Date.now(), tracks }));
+}
+function loadCatalog(serial) { try { return JSON.parse(fs.readFileSync(path.join(dir(), `${String(serial).toUpperCase()}.json`), 'utf8')); } catch { return null; } }
+
+module.exports = { remember, lastKnown, saveCatalog, loadCatalog };

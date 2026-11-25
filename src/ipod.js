@@ -11,6 +11,7 @@ const VENV = path.join(process.env.SLDL_HOME || path.join(os.homedir(), '.config
 const PY = path.join(VENV, 'bin', 'python');
 // Python cannot read inside app.asar; electron-builder unpacks tools/ next to it.
 const SCRIPT = path.join(__dirname, '..', 'tools', 'ipod_add.py').replace('app.asar', 'app.asar.unpacked');
+const CATALOG = path.join(__dirname, '..', 'tools', 'ipod_catalog.py').replace('app.asar', 'app.asar.unpacked');
 const RECONNECT = path.join(__dirname, '..', 'tools', 'ipod_reconnect.py').replace('app.asar', 'app.asar.unpacked');
 
 const ready = () => fs.existsSync(PY);
@@ -30,13 +31,14 @@ async function setup() {
 const guidOf = (serial) => String(serial || '').toUpperCase().replace(/[^0-9A-F]/g, '');
 
 // onEvent gets each JSON line the script prints. Resolves with the final "done" object.
-function addToIpod({ mount, guid, playlist, files, onEvent = () => {} }) {
+function addToIpod({ mount, guid, playlist, files, folder, onEvent = () => {} }) {
   return new Promise((resolve, reject) => {
     if (!ready()) return reject(new Error('The iPod helper is not installed. Run: sldl-dl ipod-setup'));
     if (!/^[0-9A-F]{16}$/.test(guid)) return reject(new Error('Could not read the iPod serial (FireWire GUID) from USB.'));
     const list = files.filter((f) => AUDIO.test(f));
-    if (!list.length) return reject(new Error('No audio files to add.'));
-    const p = spawn(PY, [SCRIPT, mount, playlist || '', guid, ...list]);
+    const hasLinks = !!folder && fs.existsSync(path.join(folder, '.links.json'));   // songs the iPod already has, to link into the playlist
+    if (!list.length && !hasLinks) return reject(new Error('No audio files to add.'));
+    const p = spawn(PY, [SCRIPT, mount, playlist || '', guid, ...list], { env: { ...process.env, ...(folder ? { SLDL_FOLDER: folder } : {}) } });
     let done = null; let errText = ''; let buf = '';
     p.stdout.on('data', (d) => {
       buf += d;
@@ -48,6 +50,16 @@ function addToIpod({ mount, guid, playlist, files, onEvent = () => {} }) {
     });
     p.stderr.on('data', (d) => { errText += d; });
     p.on('close', (code) => (code === 0 && done ? resolve(done) : reject(new Error(errText.trim() || `iPod helper exited with code ${code}`))));
+  });
+}
+
+// What is on a mounted iPod (read-only), as { tracks:[{title, artist, seconds, playlists}], films }.
+function readCatalog(mount) {
+  return new Promise((resolve, reject) => {
+    execFile(PY, [CATALOG, mount], { maxBuffer: 64e6, timeout: 120000 }, (err, so, se) => {
+      if (err) return reject(new Error((se || err.message).trim().split('\n').pop()));
+      try { resolve(JSON.parse(so.trim().split('\n').pop())); } catch { reject(new Error('Could not read the iPod song list.')); }
+    });
   });
 }
 
@@ -88,7 +100,7 @@ function resolveDevice(devs, want) {
 
 // An iPod only needs to be mounted while music is written to it. Mounts it (reconnect if it was ejected), runs fn(device), then
 // ejects it again, even if fn fails, so it spends as little time as possible exposed to an accidental unplug.
-async function withMounted(serial, fn, { autoEject = true, list, reconnectFn = reconnect, ejectFn = eject } = {}) {
+async function withMounted(serial, fn, { autoEject = true, list, reconnectFn = reconnect, ejectFn = eject, catalogFn = readCatalog } = {}) {
   const devices = require('./devices');
   const find = async () => (await (list || devices.list)()).find((d) => String(d.serial).toUpperCase() === String(serial).toUpperCase());
   let d = await find();
@@ -96,8 +108,13 @@ async function withMounted(serial, fn, { autoEject = true, list, reconnectFn = r
   if (!d.volume) d = await reconnectFn(serial, { list });
   try { return await fn(d); }
   finally {
+    // Refresh the stored song list while it is mounted anyway, so the next download can skip what the iPod already has.
+    try { const cat = await catalogFn(d.volume.mount); if (cat && cat.tracks) require('./known').saveCatalog(d.serial, d.model, cat.tracks); } catch { /* not critical */ }
     if (autoEject) { try { try { execFileSync('/bin/sync'); } catch { /* best effort */ } await ejectFn(d.volume.mount); } catch { /* leave it mounted rather than fail the send */ } }
   }
 }
 
-module.exports = { setup, addToIpod, reconnect, eject, resolveDevice, withMounted, ready, guidOf, VENV };
+// Mount it, refresh the stored song list, eject: nothing is written.
+const scan = (serial, opts) => withMounted(serial, async (d) => d, opts);
+
+module.exports = { setup, addToIpod, reconnect, eject, resolveDevice, withMounted, scan, readCatalog, ready, guidOf, VENV };

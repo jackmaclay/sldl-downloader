@@ -46,6 +46,7 @@ window.api.onEvent((e) => {
   if (e.type === 'done') { state.done = e.counts.done; addTrack(e.track, false); }
   if (e.type === 'failed') { state.failed = e.counts.failed; addTrack(e.track, true); }
   if (e.type === 'reused') addTrack(e.track, false, 'already had it');
+  if (e.type === 'onipod') addTrack(e.track, false, 'already on the iPod');
   if (e.type === 'copy') { $('send-note').className = 'note'; $('send-note').textContent = `Copying ${e.done}/${e.total}`; }
   if (['done', 'failed', 'total'].includes(e.type) && state.total) {
     paint((state.done + state.failed) / state.total);
@@ -63,8 +64,8 @@ const GB = (n) => (n / 1e9).toFixed(1);
 
 function finishUi(results) {
   const done = results.reduce((n, r) => n + r.done, 0); const failed = results.reduce((n, r) => n + r.failed, 0);
-  const reused = results.reduce((n, r) => n + (r.reused || 0), 0);
-  state.folders = results.filter((r) => r.folder && r.tracks.length).map((r) => r.folder); state.folder = state.folders[0] || null;
+  const reused = results.reduce((n, r) => n + (r.reused || 0) + (r.onIpod || 0), 0);
+  state.folders = results.filter((r) => r.folder && (r.tracks.length || r.onIpod)).map((r) => r.folder); state.folder = state.folders[0] || null;
   $('stat-main').textContent = (done || reused) ? (cancelled ? 'Stopped' : 'Finished') : 'Finished, nothing downloaded';
   const bits = [`${done} downloaded`]; if (reused) bits.push(`${reused} already had`); if (failed) bits.push(`${failed} not found`);
   setStatus(state.folders.length ? `${bits.join(', ')}${results.length > 1 ? `, ${state.folders.length} playlists` : ''}.` : 'No folder was created.', (done || reused) ? 'ok' : 'err');
@@ -84,14 +85,28 @@ function fmtSelect(value, inherit) {
   return sel;
 }
 
+async function fillForIpod() {
+  const sel = $('for-ipod'); const keep = sel.value; const list = (await window.api.devices()).filter((d) => d.status !== 'recovery');
+  sel.replaceChildren(new Option('None, Mac only', ''), ...list.map((d) => { const o = new Option(d.model.replace(/^iPod /, ''), d.serial); o.selected = d.serial === keep; return o; }));
+  if (!keep && list.length === 1) sel.value = list[0].serial; // only one iPod plugged in: assume it is the one
+}
+fillForIpod().catch(() => {});
+$('for-ipod').addEventListener('change', async () => { if (plan && !$('pick').hidden) { await markExisting(); refreshPlanner(''); } });
+
+async function markExisting() {
+  const r = await window.api.checkExisting({ serial: $('for-ipod').value || null, playlists: plan.playlists.map((p) => p.items.map((i) => ({ title: i.title, artist: i.artist }))) });
+  plan.playlists.forEach((p, i) => p.items.forEach((it, j) => { it.have = r.items[i][j].have; it.ipod = r.items[i][j].ipod; }));
+  plan.catalog = r.catalog;
+}
+
 async function openPlanner(input) {
   setStatus(isProfile(input) ? 'Reading profile...' : 'Reading playlist...'); $('start').disabled = true;
   try {
     plan = isProfile(input) ? await window.api.profile({ input }) : await window.api.playlistPlan({ input });
     if (!plan.playlists.length) { setStatus('There are no public playlists there.', 'err'); return; }
     setStatus('Checking what you already have...');
-    const have = await window.api.checkExisting({ playlists: plan.playlists.map((p) => p.items.map((i) => ({ title: i.title, artist: i.artist }))) });
-    plan.playlists.forEach((p, i) => { p.items.forEach((it, j) => { it.have = have[i][j]; }); p.format = ''; p.open = false; });
+    await fillForIpod(); await markExisting();
+    plan.playlists.forEach((p) => { p.format = ''; p.open = false; });
     const total = plan.playlists.reduce((n, p) => n + sizeOf(p), 0);
     plan.playlists.forEach((p) => { p.on = total <= plan.budget; });
     if (plan.playlists.length === 1) plan.playlists[0].on = true;
@@ -120,10 +135,10 @@ function renderPlanner() {
     if (p.open) {
       const wrap = text('div', 'pick-songs', '');
       p.items.forEach((it) => {
-        const row = text('div', it.have ? 'song-row have' : 'song-row', '');
+        const row = text('div', (it.have || it.ipod) ? 'song-row have' : 'song-row', '');
         const s = fmtSelect(it.format, 'Playlist'); s.title = 'Format for this song';
         s.addEventListener('change', () => { it.format = s.value; if (s.value === 'flac') $('save-lib').checked = true; refreshPlanner(''); });
-        row.append(text('span', 't', `${it.title}${it.artist ? ' - ' + it.artist : ''}`), text('span', 'dim', it.have ? 'already have it' : ''), s);
+        row.append(text('span', 't', `${it.title}${it.artist ? ' - ' + it.artist : ''}`), text('span', 'dim', it.ipod ? `already on ${$('for-ipod').selectedOptions[0].textContent}` : (it.have ? 'already have it' : '')), s);
         wrap.appendChild(row);
       });
       list.appendChild(wrap);
@@ -134,17 +149,19 @@ function renderPlanner() {
 function refreshPlanner(msg) {
   const used = usedBytes();
   plan.playlists.forEach((p, i) => {
-    const have = p.items.filter((it) => it.have).length; const flac = p.items.filter((it) => fmtOf(p, it) === 'flac').length;
+    const have = p.items.filter((it) => it.have || it.ipod).length; const flac = p.items.filter((it) => fmtOf(p, it) === 'flac').length;
     metas[i].textContent = `${p.items.length} songs${have ? `, ${have} already here` : ''}${flac ? `, ${flac} FLAC` : ''}, ${GB(sizeOf(p))} GB`;
     const blocked = !p.on && used + sizeOf(p) > plan.budget; // never let the selection go over the iPod's limit
     boxes[i].disabled = blocked; boxes[i].parentElement.classList.toggle('off', blocked);
   });
   const sel = plan.playlists.filter((p) => p.on);
-  const fresh = sel.reduce((n, p) => n + p.items.filter((it) => !it.have).length, 0);
+  const fresh = sel.reduce((n, p) => n + p.items.filter((it) => !it.have && !it.ipod).length, 0);
   $('pick-cap').textContent = `Playlists: ${GB(used)} of ${GB(plan.budget)} GB on the iPod (MP3)`;
   $('pick-go').textContent = fresh ? `Download ${fresh} new song${fresh > 1 ? 's' : ''}` : 'Add to folders';
   $('pick-go').disabled = !sel.length;
-  $('pick-note').className = 'note'; $('pick-note').textContent = msg || '';
+  const serial = $('for-ipod').value; const age = plan.catalog ? Math.round((Date.now() - plan.catalog.at) / 86400000) : null;
+  const hint = !serial ? '' : (plan.catalog ? `Song list of ${$('for-ipod').selectedOptions[0].textContent}: ${plan.catalog.count} songs, ${age < 1 ? 'saved today' : `${age} day${age > 1 ? 's' : ''} old`}.` : 'No song list for this iPod yet: use Scan on the Player page so downloads can skip what it already has.');
+  $('pick-note').className = 'note'; $('pick-note').textContent = [msg, hint].filter(Boolean).join(' ');
 }
 $('format').addEventListener('change', () => { if ($('format').value === 'flac') $('save-lib').checked = true; saveDownloadPrefs(); if (plan && !$('pick').hidden) refreshPlanner(''); });
 $('save-lib').addEventListener('change', () => { if (!$('save-lib').checked && plan && plan.playlists.some((p) => p.on && p.items.some((it) => fmtOf(p, it) === 'flac'))) { $('save-lib').checked = true; refreshPlanner('FLAC is kept in your Music folder, so that stays on.'); } saveDownloadPrefs(); });
@@ -160,7 +177,7 @@ async function runMany(list) {
       state = { ...state, total: 0, done: 0, failed: 0 }; paint(0);
       $('stat-main').textContent = `${list.length > 1 ? `Playlist ${i + 1} of ${list.length}: ` : ''}${p.name}`; $('stat-count').textContent = '';
       const r = await window.api.runPlaylist({
-        name: (list.length === 1 && $('name').value.trim()) || p.name, saveToLibrary: $('save-lib').checked, first: i === 0,
+        name: (list.length === 1 && $('name').value.trim()) || p.name, saveToLibrary: $('save-lib').checked, first: i === 0, serial: $('for-ipod').value || null,
         items: p.items.map((it) => ({ title: it.title, artist: it.artist, seconds: it.seconds, format: fmtOf(p, it) })),
       });
       paint(r.total ? (r.done + r.failed) / r.total : 1, r.failed && !r.done);
@@ -193,7 +210,7 @@ async function syncRouteUi() {
   const route = $('route').value; const copy = route === 'copy';
   $('dest-row').hidden = !copy; $('layout-row').hidden = !copy; $('ipod-row').hidden = route !== 'ipod';
   if (route === 'ipod') { // every iPod on USB, mounted or not: the app mounts the chosen one only for the upload
-    const keep = $('ipod-pick').value; const list = (await window.api.devices()).filter((d) => d.status !== 'recovery');
+    const keep = $('ipod-pick').value || $('for-ipod').value; const list = (await window.api.devices()).filter((d) => d.status !== 'recovery');
     $('ipod-pick').replaceChildren(...list.map((d) => { const o = new Option(`${d.model}${d.volume ? '' : ' (ejected, will mount for the upload)'}`, d.serial); o.selected = d.serial === keep; return o; }));
     if (!list.length) $('ipod-pick').appendChild(new Option('No iPod plugged in', ''));
   }
@@ -219,7 +236,7 @@ $('send').addEventListener('click', async () => {
     if (route === 'ipod') { // one mount for the whole batch, then it is ejected again
       note.textContent = 'Mounting the iPod...';
       const r = await window.api.send({ folders, route, serial: $('ipod-pick').value, name: $('name').value.trim() || undefined });
-      note.className = 'note ok'; note.textContent = `${r.model} updated: ${r.added} added, ${r.skipped} already there. ${r.ejected ? 'Ejected, safe to unplug.' : 'Still mounted: eject it before unplugging.'}`;
+      note.className = 'note ok'; note.textContent = `${r.model} updated: ${r.added} added, ${r.linked || 0} linked from what it already had, ${r.skipped} already there${r.missing ? `, ${r.missing} no longer on it (download them again)` : ''}. ${r.ejected ? 'Ejected, safe to unplug.' : 'Still mounted: eject it before unplugging.'}`;
       return;
     }
     for (const folder of folders) {
@@ -253,6 +270,7 @@ async function loadDevices() {
       card.append(text('div', '', `${d.volume.mount}  ·  ${gb(d.volume.free)} GB free of ${gb(d.volume.total)} GB`));
       if (d.volume.flags.length) { const ul = document.createElement('ul'); d.volume.flags.forEach((f) => ul.appendChild(text('li', 'warn', f))); card.appendChild(ul); }
     }
+    if (d.catalog) card.append(text('div', '', `Song list: ${d.catalog.count} songs, saved ${new Date(d.catalog.at).toLocaleDateString()}`));
     if (d.last) card.append(text('div', '', `Last seen: ${GB(d.last.free)} GB free of ${GB(d.last.total)} GB`));
     if (EXPLAIN[d.status]) card.appendChild(text('div', 'explain', EXPLAIN[d.status]));
     if (d.status !== 'recovery') { // mounted: Eject. Ejected but still on USB: Reconnect (no unplugging).
@@ -264,6 +282,9 @@ async function loadDevices() {
         loadDevices();
       });
       card.appendChild(b);
+      const sc = text('button', 'btn', 'Scan songs'); sc.title = 'Mount it, read what is on it, eject it. Nothing is written. Lets downloads skip songs it already has.';
+      sc.addEventListener('click', async () => { sc.disabled = true; sc.textContent = 'Scanning...'; try { await window.api.ipodScan({ serial: d.serial }); $('music-note').textContent = ''; } catch (err) { $('music-note').textContent = clean(err); } loadDevices(); });
+      card.appendChild(sc);
     }
     box.appendChild(card);
   }

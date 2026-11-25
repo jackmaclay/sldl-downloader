@@ -262,3 +262,41 @@ test('known: remembers free space of a mounted iPod', () => {
   const k = known.lastKnown(); assert.strictEqual(k.S1.free, 5e9); assert.strictEqual(k.S2, undefined);
   delete process.env.SLDL_HOME;
 });
+
+test('dedupe + plan: a song the iPod already has is not downloaded, only linked at upload', async () => {
+  const dedupe = require('../src/dedupe'); const plan = require('../src/plan'); const { EventEmitter } = require('events');
+  const ipod = tmp(); const lib = tmp(); const asked = [];
+  const catalog = { tracks: [{ title: 'Start Me Up', artist: 'The Rolling Stones' }, { title: 'Only On Ipod', artist: 'Band' }] };
+  const index = await dedupe.buildIndex([], { catalog });
+  assert.ok(index.onIpod('Start Me Up - Remastered 2009', 'The Rolling Stones'));    // a remaster label does not matter
+  assert.ok(!index.onIpod('Something Else', 'Band'));
+  const download = ({ input, outDir }) => {
+    const ev = new EventEmitter(); const rows = fs.readFileSync(input, 'utf8').trim().split('\n').slice(1); asked.push(rows.length);
+    const folder = path.join(outDir, path.basename(input, '.csv')); fs.mkdirSync(folder, { recursive: true });
+    for (const r of rows) fs.writeFileSync(path.join(folder, r.split('","')[2].replace(/"/g, '') + '.mp3'), 'x');
+    ev.done = Promise.resolve({ code: 0, ok: true, total: rows.length, done: rows.length, failed: 0, folder, tracks: [] }); return ev;
+  };
+  const items = [{ title: 'Start Me Up - Remastered 2009', artist: 'The Rolling Stones', seconds: 1, format: 'mp3' }, { title: 'Brand New', artist: 'Band', seconds: 1, format: 'mp3' }];
+  const r = await plan.runPlaylist({ name: 'New List', items, saveToLibrary: false, libraryDir: lib, ipodDir: ipod, index, download }).done;
+  assert.deepStrictEqual(asked, [1]);                                                  // only "Brand New" was requested
+  assert.strictEqual(r.onIpod, 1);
+  const links = JSON.parse(fs.readFileSync(path.join(ipod, 'New List', '.links.json'), 'utf8'));
+  assert.deepStrictEqual(links, [{ title: 'Start Me Up - Remastered 2009', artist: 'The Rolling Stones' }]);
+  assert.deepStrictEqual(fs.readdirSync(path.join(ipod, 'New List')).filter((f) => f.endsWith('.mp3')), ['Brand New.mp3']);
+  // a playlist made only of songs the iPod has still gets a folder (with the links) so the upload can link them
+  const r2 = await plan.runPlaylist({ name: 'All Have', items: [items[0]], saveToLibrary: false, libraryDir: lib, ipodDir: ipod, index, download }).done;
+  assert.strictEqual(r2.onIpod, 1); assert.ok(fs.existsSync(path.join(ipod, 'All Have', '.links.json'))); assert.strictEqual(r2.tracks.length, 0);
+  // FLAC wanted for the library is NOT skipped just because the iPod has an MP3
+  asked.length = 0;
+  fs.mkdirSync(path.join(lib, 'x'), { recursive: true });
+  await assert.rejects(plan.runPlaylist({ name: 'F', items: [{ ...items[0], format: 'flac' }], saveToLibrary: false, libraryDir: lib, ipodDir: ipod, index, download }).done, /FLAC is kept/);
+});
+
+test('withMounted refreshes the iPod song list before ejecting', async () => {
+  const ipod = require('../src/ipod'); const known = require('../src/known'); process.env.SLDL_HOME = tmp(); const order = [];
+  let mounted = false; const dev = () => ({ model: 'iPod nano 4G', serial: 'S9', volume: mounted ? { mount: '/Volumes/iPod 1' } : null });
+  await ipod.withMounted('S9', async () => order.push('work'), { list: async () => [dev()], reconnectFn: async () => { mounted = true; return dev(); },
+    catalogFn: async () => { order.push('catalog'); return { tracks: [{ title: 'A', artist: 'B' }] }; }, ejectFn: async () => order.push('eject') });
+  assert.deepStrictEqual(order, ['work', 'catalog', 'eject']);
+  assert.strictEqual(known.loadCatalog('S9').tracks.length, 1); delete process.env.SLDL_HOME;
+});

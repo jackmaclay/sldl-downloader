@@ -37,6 +37,7 @@ function runPlaylist(opts) {
     if (convert === undefined) { const bin = library.findFfmpeg(); convert = bin ? library.ffmpegToMp3(bin) : null; }
     const name = slug(opts.name);
     const totals = { total: 0, done: 0, failed: 0 }; const sum = { cloned: 0, copied: 0, converted: 0, reused: 0, notes: [] };
+    const linkOnly = []; // songs the iPod already has: no download, just linked into this playlist at upload time
     const absorb = (f) => { sum.cloned += f.cloned; sum.copied += f.copied; sum.converted += f.converted; sum.notes.push(...f.notes); };
     for (const [fmt, list] of Object.entries(groups)) {
       if (!list.length || cancelled) continue;
@@ -54,6 +55,12 @@ function runPlaylist(opts) {
             sum.reused += have.length;
           }
         }
+        // 1b. songs the iPod already has (from its stored song list): linked at upload, not downloaded. Not for FLAC: that is for the Mac library.
+        if (opts.index && opts.index.onIpod && fmt === 'mp3') {
+          const rest = [];
+          for (const i of todo) { if (opts.index.onIpod(i.title, i.artist)) { linkOnly.push({ title: i.title, artist: i.artist }); ev.emit('onipod', { type: 'onipod', track: `${i.artist} - ${i.title}` }); } else rest.push(i); }
+          todo = rest;
+        }
         // 2. the rest
         if (todo.length && !cancelled) {
           fs.mkdirSync(path.join(staging, 'csv'));
@@ -68,11 +75,17 @@ function runPlaylist(opts) {
       } finally { fs.rmSync(staging, { recursive: true, force: true }); }
     }
     let folder = path.join(ipodDir, name);
+    if (linkOnly.length) {
+      fs.mkdirSync(folder, { recursive: true }); const side = path.join(folder, '.links.json'); let cur = [];
+      try { cur = JSON.parse(fs.readFileSync(side, 'utf8')); } catch { /* new */ }
+      const seen = new Set(cur.map((x) => `${x.title}|${x.artist}`));
+      fs.writeFileSync(side, JSON.stringify(cur.concat(linkOnly.filter((x) => !seen.has(`${x.title}|${x.artist}`))), null, 1));
+    }
     if (opts.only && fs.existsSync(folder)) folder = library.moveOnly(folder, opts.only);
     const libraryFolder = saveToLibrary && !opts.only ? path.join(libraryDir, name) : null;
     // What was filed now counts as "already have" for the next playlist in the batch.
     if (opts.index) for (const d of [folder, libraryFolder]) for (const f of library.listAudio(d || '')) await opts.index.addFile(f);
-    return { ok: !cancelled, ...totals, ...sum, folder: fs.existsSync(folder) ? folder : null, libraryFolder,
+    return { ok: !cancelled, ...totals, ...sum, onIpod: linkOnly.length, folder: fs.existsSync(folder) ? folder : null, libraryFolder,
       tracks: fs.existsSync(folder) ? library.listAudio(folder).filter((f) => library.IPOD_OK.test(f)).sort() : [] };
   })();
   return ev;

@@ -57,9 +57,35 @@ def main():
     side = {}
     try:
         import json as _j
-        side = _j.load(open(os.path.join(os.path.dirname(files[0]), ".tags.json"))) if files else {}
+        folder0 = os.environ.get("SLDL_FOLDER") or (os.path.dirname(files[0]) if files else "")
+        side = _j.load(open(os.path.join(folder0, ".tags.json"))) if folder0 and os.path.exists(os.path.join(folder0, ".tags.json")) else {}
     except Exception:
         side = {}
+    # Songs the iPod already has (found before downloading, from its stored song list): link them into this playlist, no file needed.
+    import re as _re, unicodedata as _u
+    def _fold(x): return _u.normalize("NFKD", str(x or "")).encode("ascii", "ignore").decode().lower().replace("'", "")
+    def _loose(title, artist):   # same idea as the app's check: "Imagine - Remastered 2010" is the song "Imagine"; artist = first word
+        t = _re.sub(r"\(.*?\)|\[.*?\]", " ", _fold(title)); t = _re.split(r"\s-\s", t)[0]
+        t = _re.sub(r"\b(remaster(ed)?|version|mix|edit|live|feat|ft)\b.*$", " ", t)
+        w = _re.sub(r"[^a-z0-9 ]", " ", _fold(artist)).split()
+        return " ".join(_re.sub(r"[^a-z0-9 ]", " ", t).split()), (w[0] if w else "")
+    loose = {}
+    for _t in db.tracks:
+        if not _t.is_video: loose.setdefault(_loose(_t.title, _t.artist), _t)
+    linked = missing = 0
+    try:
+        links = _j.load(open(os.path.join(folder0, ".links.json"))) if folder0 and os.path.exists(os.path.join(folder0, ".links.json")) else []
+    except Exception:
+        links = []
+    for it in links:
+        k = _loose(it.get("title"), it.get("artist"))
+        t = loose.get(k) or loose.get((k[0], ""))
+        if t is None:
+            missing += 1
+            emit(type="track", n=0, of=len(links), file=it.get("title", ""), status="not on the iPod any more", msg="download it again")
+            continue
+        if pl is not None and t.track_id not in in_pl:
+            db.add_track_to_playlist(pl, t); in_pl.add(t.track_id); linked += 1
     added = skipped = 0
     for i, path in enumerate(files, 1):
         name = os.path.basename(path)
@@ -88,7 +114,7 @@ def main():
     data = open(p, "rb").read()
     assert len(data) > 1000, "iTunesDB is empty, refusing to sign"
     open(p, "wb").write(compute_hash58(data, guid))
-    emit(type="done", added=added, skipped=skipped, total=len(db.tracks))
+    emit(type="done", added=added, skipped=skipped, linked=linked, missing=missing, total=len(db.tracks))
     return 0
 
 
